@@ -1,0 +1,12 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    prefer_const_declarations: true
+    prefer_final_locals: true
+    prefer_single_quotes: true
+    unawaited_futures: true
+    annotate_overrides: true
+    sort_constructors_first: true
+    avoid_print: false  # Example app uses print

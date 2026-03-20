@@ -1,0 +1,54 @@
+// The Android Gradle plugin lets us bundle precompiled .so files
+// in src/main/jniLibs/<ABI>/ automatically.
+//
+// When building an App Bundle, only the relevant ABI is included
+// in the user's download (~2-3 MB, not all ABIs).
+
+group = 'dev.nicearma.ironpress'
+version = '1.0'
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.1.0")
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace = "dev.nicearma.ironpress"
+    compileSdk = 34
+
+    defaultConfig {
+        minSdk = 21
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    // The precompiled .so files are placed in:
+    //   android/src/main/jniLibs/arm64-v8a/libironpress.so
+    //   android/src/main/jniLibs/armeabi-v7a/libironpress.so
+    //   android/src/main/jniLibs/x86_64/libironpress.so
+    //
+    // Gradle picks them up automatically from jniLibs/.
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+}

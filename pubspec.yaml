@@ -1,0 +1,47 @@
+name: ironpress
+description: >
+  High-performance image compression powered by Rust.
+  Uses mozjpeg for JPEG, oxipng for PNG, and WebP (lossy + lossless).
+  Accepts JPEG, PNG, WebP, GIF, BMP, TIFF as input.
+  Features binary-search file size targeting, batch processing,
+  and consistent cross-platform output.
+version: 0.1.0
+homepage: https://github.com/nicearma/ironpress
+repository: https://github.com/nicearma/ironpress
+issue_tracker: https://github.com/nicearma/ironpress/issues
+topics:
+  - image-compression
+  - rust
+  - ffi
+  - performance
+  - image-processing
+
+environment:
+  sdk: ^3.5.0
+  flutter: ">=3.24.0"
+
+dependencies:
+  ffi: ^2.1.0
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+# Platform support is gated by precompiled native binaries.
+# Only platforms with binaries in the package will work.
+flutter:
+  plugin:
+    platforms:
+      android:
+        ffiPlugin: true
+      ios:
+        ffiPlugin: true
+      macos:
+        ffiPlugin: true
+      linux:
+        ffiPlugin: true
+      windows:
+        ffiPlugin: true

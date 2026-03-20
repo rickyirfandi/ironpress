@@ -1,0 +1,325 @@
+name: Build Native Libraries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  FLUTTER_VERSION: '3.24.0'
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-linux-android
+            abi: arm64-v8a
+          - target: armv7-linux-androideabi
+            abi: armeabi-v7a
+          - target: x86_64-linux-android
+            abi: x86_64
+          - target: i686-linux-android
+            abi: x86
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ndk;27.0.12077973
+
+      - name: Build Android library
+        working-directory: rust
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cargo ndk \
+            --target ${{ matrix.target }} \
+            --platform 21 \
+            build --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ matrix.abi }}
+          path: rust/target/${{ matrix.target }}/release/libironpress.so
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Windows library
+        working-directory: rust
+        run: cargo build --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: rust/target/release/ironpress.dll
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y nasm
+
+      - name: Build Linux library
+        working-directory: rust
+        run: cargo build --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: rust/target/release/libironpress.so
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Build macOS universal binary
+        working-directory: rust
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          lipo -create \
+            target/aarch64-apple-darwin/release/libironpress.dylib \
+            target/x86_64-apple-darwin/release/libironpress.dylib \
+            -output target/release/libironpress.dylib
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: rust/target/release/libironpress.dylib
+
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: Build iOS libraries
+        working-directory: rust
+        run: |
+          cargo build --release --target aarch64-apple-ios
+          cargo build --release --target aarch64-apple-ios-sim
+          cargo build --release --target x86_64-apple-ios
+
+      - name: Create xcframework
+        working-directory: rust
+        run: |
+          # Simulator fat library
+          lipo -create \
+            target/aarch64-apple-ios-sim/release/libironpress.a \
+            target/x86_64-apple-ios/release/libironpress.a \
+            -output target/release/libironpress-sim.a
+
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libironpress.a \
+            -library target/release/libironpress-sim.a \
+            -output target/release/ironpress.xcframework
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcframework
+          path: rust/target/release/ironpress.xcframework
+
+  rust-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y nasm
+
+      - name: Run Rust tests
+        working-directory: rust
+        run: cargo test
+
+  package:
+    needs: [build-android, build-windows, build-linux, build-macos, build-ios, rust-tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assemble Android jniLibs
+        run: |
+          mkdir -p android/src/main/jniLibs/arm64-v8a
+          mkdir -p android/src/main/jniLibs/armeabi-v7a
+          mkdir -p android/src/main/jniLibs/x86_64
+          mkdir -p android/src/main/jniLibs/x86
+
+          cp artifacts/android-arm64-v8a/libironpress.so \
+             android/src/main/jniLibs/arm64-v8a/
+          cp artifacts/android-armeabi-v7a/libironpress.so \
+             android/src/main/jniLibs/armeabi-v7a/
+          cp artifacts/android-x86_64/libironpress.so \
+             android/src/main/jniLibs/x86_64/
+          cp artifacts/android-x86/libironpress.so \
+             android/src/main/jniLibs/x86/
+
+      - name: Assemble Windows DLL
+        run: |
+          mkdir -p windows/libs
+          cp artifacts/windows-x64/ironpress.dll windows/libs/
+
+      - name: Assemble Linux .so
+        run: |
+          mkdir -p linux/libs
+          cp artifacts/linux-x64/libironpress.so linux/libs/
+
+      - name: Assemble macOS .dylib
+        run: |
+          mkdir -p macos/libs
+          cp artifacts/macos-universal/libironpress.dylib macos/libs/
+
+      - name: Assemble iOS xcframework
+        run: |
+          mkdir -p ios/Frameworks
+          cp -r artifacts/ios-xcframework/ironpress.xcframework ios/Frameworks/
+
+      - name: Verify structure
+        run: |
+          echo "=== Android ==="
+          find android/src/main/jniLibs -type f -exec ls -lh {} \;
+          echo ""
+          echo "=== Windows ==="
+          find windows/libs -type f -exec ls -lh {} \;
+          echo ""
+          echo "=== Linux ==="
+          find linux/libs -type f -exec ls -lh {} \;
+          echo ""
+          echo "=== macOS ==="
+          find macos/libs -type f -exec ls -lh {} \;
+          echo ""
+          echo "=== iOS ==="
+          find ios/Frameworks -type f -exec ls -lh {} \;
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Validate package
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+          flutter pub publish --dry-run
+
+      - name: Commit precompiled binaries
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add -f \
+            android/src/main/jniLibs/ \
+            windows/libs/ \
+            linux/libs/ \
+            macos/libs/ \
+            ios/Frameworks/
+
+          # Only commit if there are changes
+          if git diff --cached --quiet; then
+            echo "No changes to commit — binaries are up to date."
+          else
+            git commit -m "chore: update precompiled native binaries
+
+          Built from ${GITHUB_SHA::8} via CI.
+          Platforms: Android (arm64-v8a, armeabi-v7a, x86_64, x86),
+          Windows (x64), Linux (x64), macOS (universal), iOS (xcframework)"
+
+            git push origin HEAD:${{ github.event.repository.default_branch }}
+            echo "Precompiled binaries committed and pushed."
+          fi
+
+      - name: Upload packaged plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironpress-packaged
+          path: |
+            .pubignore
+            CHANGELOG.md
+            LICENSE
+            README.md
+            analysis_options.yaml
+            android/build.gradle
+            android/src/main/AndroidManifest.xml
+            android/src/main/jniLibs/
+            example/
+            ios/
+            lib/
+            linux/
+            macos/
+            pubspec.yaml
+            rust/
+            test/
+            windows/
+
+  publish:
+    needs: [package]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ironpress-packaged
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Publish
+        run: flutter pub publish --force

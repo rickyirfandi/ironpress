@@ -1,0 +1,589 @@
+#[cfg(test)]
+mod tests {
+    use crate::compress::*;
+    use crate::options::*;
+
+    /// Create a minimal valid JPEG for testing.
+    fn minimal_jpeg() -> Vec<u8> {
+        let img = image::RgbImage::from_pixel(64, 64, image::Rgb([255, 0, 0]));
+        let dynamic = image::DynamicImage::ImageRgb8(img);
+        let mut buf = Vec::new();
+        let mut cursor = std::io::Cursor::new(&mut buf);
+        dynamic
+            .write_to(&mut cursor, image::ImageFormat::Jpeg)
+            .unwrap();
+        buf
+    }
+
+    /// Create a minimal valid PNG for testing.
+    fn minimal_png() -> Vec<u8> {
+        let img = image::RgbaImage::from_pixel(64, 64, image::Rgba([0, 0, 255, 255]));
+        let dynamic = image::DynamicImage::ImageRgba8(img);
+        let mut buf = Vec::new();
+        let mut cursor = std::io::Cursor::new(&mut buf);
+        dynamic
+            .write_to(&mut cursor, image::ImageFormat::Png)
+            .unwrap();
+        buf
+    }
+
+    /// Create a larger image for more realistic testing.
+    fn test_image_jpeg(width: u32, height: u32) -> Vec<u8> {
+        let mut img = image::RgbImage::new(width, height);
+        for y in 0..height {
+            for x in 0..width {
+                let r = ((x * 255) / width.max(1)) as u8;
+                let g = ((y * 255) / height.max(1)) as u8;
+                let b = (((x + y) * 128) / (width + height).max(1)) as u8;
+                img.put_pixel(x, y, image::Rgb([r, g, b]));
+            }
+        }
+        let dynamic = image::DynamicImage::ImageRgb8(img);
+        let mut buf = Vec::new();
+        let mut cursor = std::io::Cursor::new(&mut buf);
+        dynamic
+            .write_to(&mut cursor, image::ImageFormat::Jpeg)
+            .unwrap();
+        buf
+    }
+
+    /// Build a JPEG with an APP1/Exif segment for EXIF detection tests.
+    fn jpeg_with_exif() -> Vec<u8> {
+        let base = minimal_jpeg();
+        // Inject a fake APP1/Exif segment right after SOI (FF D8)
+        let mut out = Vec::new();
+        out.extend_from_slice(&base[..2]); // SOI: FF D8
+        // APP1 marker: FF E1
+        out.push(0xFF);
+        out.push(0xE1);
+        // Segment length (includes length field itself): 2 + 6 (Exif\0\0) + 2 (dummy) = 10
+        out.push(0x00);
+        out.push(0x0A);
+        out.extend_from_slice(b"Exif\0\0");
+        out.push(0x00);
+        out.push(0x00); // dummy TIFF data
+        out.extend_from_slice(&base[2..]); // rest of JPEG
+        out
+    }
+
+    /// Build a PNG with an eXIf chunk for EXIF detection tests.
+    fn png_with_exif() -> Vec<u8> {
+        let base = minimal_png();
+        // Insert an eXIf chunk before IEND
+        // Find IEND position (last 12 bytes of a valid PNG: len+type+crc)
+        let iend_pos = base.len() - 12;
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&base[..iend_pos]);
+
+        // eXIf chunk with 4 bytes of dummy data
+        let chunk_data = [0u8; 4];
+        let chunk_len = (chunk_data.len() as u32).to_be_bytes();
+        out.extend_from_slice(&chunk_len);
+        out.extend_from_slice(b"eXIf");
+        out.extend_from_slice(&chunk_data);
+        // CRC (simplified — not valid but sufficient for detection test)
+        out.extend_from_slice(&[0u8; 4]);
+
+        out.extend_from_slice(&base[iend_pos..]); // IEND
+        out
+    }
+
+    // ─── Format Detection ────────────────────────────────────────────
+
+    #[test]
+    fn detect_jpeg_format() {
+        let data = minimal_jpeg();
+        let fmt = detect_format(&data).unwrap();
+        assert_eq!(fmt, DetectedFormat::Jpeg);
+    }
+
+    #[test]
+    fn detect_png_format() {
+        let data = minimal_png();
+        let fmt = detect_format(&data).unwrap();
+        assert_eq!(fmt, DetectedFormat::Png);
+    }
+
+    #[test]
+    fn detect_invalid_format() {
+        let data = vec![0u8; 100];
+        assert!(detect_format(&data).is_err());
+    }
+
+    #[test]
+    fn detect_too_small() {
+        let data = vec![0u8; 3];
+        assert!(detect_format(&data).is_err());
+    }
+
+    // ─── Basic Compression ───────────────────────────────────────────
+
+    #[test]
+    fn compress_jpeg_basic() {
+        let input = minimal_jpeg();
+        let params = CompressParams::default();
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert!(!result.data.is_empty());
+        assert_eq!(result.width, 64);
+        assert_eq!(result.height, 64);
+        assert_eq!(result.quality_used, 80);
+        assert_eq!(result.iterations, 1);
+        assert!(!result.resized_to_fit);
+    }
+
+    #[test]
+    fn compress_png_basic() {
+        let input = minimal_png();
+        let params = CompressParams::default();
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert!(!result.data.is_empty());
+        assert_eq!(result.width, 64);
+        assert_eq!(result.height, 64);
+    }
+
+    #[test]
+    fn compress_different_qualities() {
+        let input = test_image_jpeg(256, 256);
+
+        let low_q = {
+            let mut p = CompressParams::default();
+            p.quality = 20;
+            compress_bytes(&input, &p).unwrap()
+        };
+
+        let high_q = {
+            let mut p = CompressParams::default();
+            p.quality = 95;
+            compress_bytes(&input, &p).unwrap()
+        };
+
+        assert!(
+            low_q.data.len() < high_q.data.len(),
+            "q20 ({}) should be smaller than q95 ({})",
+            low_q.data.len(),
+            high_q.data.len()
+        );
+    }
+
+    // ─── JPEG Preset Branches ────────────────────────────────────────
+
+    #[test]
+    fn jpeg_progressive_trellis() {
+        let input = minimal_jpeg();
+        let mut params = CompressParams::default();
+        params.jpeg_progressive = 1;
+        params.jpeg_trellis = 1;
+        let result = compress_bytes(&input, &params).unwrap();
+        assert!(!result.data.is_empty());
+    }
+
+    #[test]
+    fn jpeg_progressive_no_trellis() {
+        let input = minimal_jpeg();
+        let mut params = CompressParams::default();
+        params.jpeg_progressive = 1;
+        params.jpeg_trellis = 0;
+        let result = compress_bytes(&input, &params).unwrap();
+        assert!(!result.data.is_empty());
+    }
+
+    #[test]
+    fn jpeg_baseline_trellis() {
+        let input = minimal_jpeg();
+        let mut params = CompressParams::default();
+        params.jpeg_progressive = 0;
+        params.jpeg_trellis = 1;
+        let result = compress_bytes(&input, &params).unwrap();
+        assert!(!result.data.is_empty());
+    }
+
+    #[test]
+    fn jpeg_baseline_no_trellis() {
+        let input = minimal_jpeg();
+        let mut params = CompressParams::default();
+        params.jpeg_progressive = 0;
+        params.jpeg_trellis = 0;
+        let result = compress_bytes(&input, &params).unwrap();
+        assert!(!result.data.is_empty());
+    }
+
+    // ─── Resize ──────────────────────────────────────────────────────
+
+    #[test]
+    fn resize_constrains_width() {
+        let input = test_image_jpeg(400, 300);
+        let mut params = CompressParams::default();
+        params.max_width = 200;
+
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert!(result.width <= 200, "Width {} exceeds max 200", result.width);
+        assert_eq!(result.height, 150);
+    }
+
+    #[test]
+    fn resize_constrains_height() {
+        let input = test_image_jpeg(400, 300);
+        let mut params = CompressParams::default();
+        params.max_height = 150;
+
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert!(
+            result.height <= 150,
+            "Height {} exceeds max 150",
+            result.height
+        );
+        assert_eq!(result.width, 200);
+    }
+
+    #[test]
+    fn resize_no_upscale() {
+        let input = test_image_jpeg(100, 100);
+        let mut params = CompressParams::default();
+        params.max_width = 500;
+        params.max_height = 500;
+
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert_eq!(result.width, 100);
+        assert_eq!(result.height, 100);
+    }
+
+    // ─── Target File Size ────────────────────────────────────────────
+
+    #[test]
+    fn target_size_achievable() {
+        let input = test_image_jpeg(512, 512);
+        let target = input.len() / 2;
+
+        let mut params = CompressParams::default();
+        params.max_file_size = target as u32;
+        params.min_quality = 10;
+
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert!(
+            result.data.len() <= target,
+            "Output {} exceeds target {}",
+            result.data.len(),
+            target
+        );
+        assert!(result.iterations > 1, "Should have needed multiple iterations");
+    }
+
+    #[test]
+    fn target_size_with_auto_resize() {
+        let input = test_image_jpeg(512, 512);
+        let target: usize = 1024;
+
+        let mut params = CompressParams::default();
+        params.max_file_size = target as u32;
+        params.min_quality = 10;
+        params.allow_resize = 1;
+
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert!(
+            result.data.len() <= target || result.resized_to_fit,
+            "Should either hit target or have resized"
+        );
+    }
+
+    #[test]
+    fn target_size_without_resize_returns_best_effort() {
+        let input = test_image_jpeg(512, 512);
+        let target: usize = 100;
+
+        let mut params = CompressParams::default();
+        params.max_file_size = target as u32;
+        params.min_quality = 10;
+        params.allow_resize = 0;
+
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert_eq!(result.quality_used, 10);
+        assert!(!result.resized_to_fit);
+    }
+
+    // ─── Format Conversion ───────────────────────────────────────────
+
+    #[test]
+    fn jpeg_to_png_conversion() {
+        let input = minimal_jpeg();
+        let mut params = CompressParams::default();
+        params.format = 2;
+
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert_eq!(&result.data[0..4], &[0x89, 0x50, 0x4E, 0x47]);
+    }
+
+    #[test]
+    fn png_to_jpeg_conversion() {
+        let input = minimal_png();
+        let mut params = CompressParams::default();
+        params.format = 1;
+
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert_eq!(&result.data[0..3], &[0xFF, 0xD8, 0xFF]);
+    }
+
+    #[test]
+    fn keep_metadata_on_png_silently_skips() {
+        let input = minimal_png();
+        let mut params = CompressParams::default();
+        params.keep_metadata = 1;
+
+        // keepMetadata on non-JPEG should succeed (metadata silently dropped)
+        let result = compress_bytes(&input, &params).unwrap();
+        assert!(!result.data.is_empty());
+    }
+
+    #[test]
+    fn keep_metadata_on_jpeg_without_exif_still_succeeds() {
+        let input = minimal_jpeg();
+        let mut params = CompressParams::default();
+        params.keep_metadata = 1;
+
+        let result = compress_bytes(&input, &params).unwrap();
+        assert!(!result.data.is_empty());
+    }
+
+    // ─── Edge Cases ──────────────────────────────────────────────────
+
+    #[test]
+    fn empty_input_returns_error() {
+        let params = CompressParams::default();
+        assert!(compress_bytes(&[], &params).is_err());
+    }
+
+    #[test]
+    fn garbage_input_returns_error() {
+        let params = CompressParams::default();
+        assert!(compress_bytes(&[0xFF, 0xD8, 0xFF, 0x00, 0x00], &params).is_err());
+    }
+
+    #[test]
+    fn quality_zero_still_produces_output() {
+        let input = minimal_jpeg();
+        let mut params = CompressParams::default();
+        params.quality = 0;
+
+        let result = compress_bytes(&input, &params).unwrap();
+        assert!(!result.data.is_empty());
+    }
+
+    #[test]
+    fn quality_hundred_produces_output() {
+        let input = minimal_jpeg();
+        let mut params = CompressParams::default();
+        params.quality = 100;
+
+        let result = compress_bytes(&input, &params).unwrap();
+        assert!(!result.data.is_empty());
+    }
+
+    // ─── WebP Encoding ───────────────────────────────────────────────
+
+    #[test]
+    fn jpeg_to_webp_conversion() {
+        let input = minimal_jpeg();
+        let mut params = CompressParams::default();
+        params.format = 3;
+
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert!(result.data.len() > 12);
+        assert_eq!(&result.data[0..4], b"RIFF");
+        assert_eq!(&result.data[8..12], b"WEBP");
+    }
+
+    #[test]
+    fn png_to_webp_conversion() {
+        let input = minimal_png();
+        let mut params = CompressParams::default();
+        params.format = 3;
+
+        let result = compress_bytes(&input, &params).unwrap();
+        assert_eq!(&result.data[0..4], b"RIFF");
+        assert_eq!(&result.data[8..12], b"WEBP");
+    }
+
+    // ─── EXIF Detection ─────────────────────────────────────────────
+
+    #[test]
+    fn detect_exif_in_jpeg_with_exif() {
+        let data = jpeg_with_exif();
+        let info = probe_bytes(&data).unwrap();
+        assert!(info.has_exif, "Should detect injected EXIF in JPEG");
+    }
+
+    #[test]
+    fn detect_no_exif_in_plain_jpeg() {
+        let data = minimal_jpeg();
+        let info = probe_bytes(&data).unwrap();
+        assert!(!info.has_exif, "Plain JPEG should not have EXIF");
+    }
+
+    #[test]
+    fn detect_exif_in_png_with_exif_chunk() {
+        let data = png_with_exif();
+        let info = probe_bytes(&data).unwrap();
+        assert!(info.has_exif, "Should detect injected eXIf chunk in PNG");
+    }
+
+    #[test]
+    fn detect_no_exif_in_plain_png() {
+        let data = minimal_png();
+        let info = probe_bytes(&data).unwrap();
+        assert!(!info.has_exif, "Plain PNG should not have EXIF");
+    }
+
+    #[test]
+    fn exif_preserved_in_jpeg_roundtrip() {
+        let data = jpeg_with_exif();
+        let mut params = CompressParams::default();
+        params.keep_metadata = 1;
+
+        let result = compress_bytes(&data, &params).unwrap();
+        let probe = probe_bytes(&result.data).unwrap();
+        assert!(probe.has_exif, "EXIF should survive JPEG roundtrip with keep_metadata");
+    }
+
+    // ─── PNG Optimization Levels ─────────────────────────────────────
+
+    #[test]
+    fn png_optimization_level_0() {
+        let input = minimal_png();
+        let mut params = CompressParams::default();
+        params.png_optimization_level = 0;
+        let result = compress_bytes(&input, &params).unwrap();
+        assert!(!result.data.is_empty());
+    }
+
+    #[test]
+    fn png_optimization_level_6() {
+        let input = minimal_png();
+        let mut params = CompressParams::default();
+        params.png_optimization_level = 6;
+        let result = compress_bytes(&input, &params).unwrap();
+        assert!(!result.data.is_empty());
+    }
+
+    #[test]
+    fn png_optimization_clamped_above_6() {
+        let input = minimal_png();
+        let mut params = CompressParams::default();
+        params.png_optimization_level = 99;
+        // Should not panic — clamped to 6
+        let result = compress_bytes(&input, &params).unwrap();
+        assert!(!result.data.is_empty());
+    }
+
+    // ─── Probe ───────────────────────────────────────────────────────
+
+    #[test]
+    fn probe_jpeg() {
+        let input = test_image_jpeg(400, 300);
+        let info = probe_bytes(&input).unwrap();
+
+        assert_eq!(info.width, 400);
+        assert_eq!(info.height, 300);
+        assert_eq!(info.format, DetectedFormat::Jpeg);
+        assert_eq!(info.file_size, input.len());
+    }
+
+    #[test]
+    fn probe_png() {
+        let input = minimal_png();
+        let info = probe_bytes(&input).unwrap();
+
+        assert_eq!(info.width, 64);
+        assert_eq!(info.height, 64);
+        assert_eq!(info.format, DetectedFormat::Png);
+    }
+
+    #[test]
+    fn probe_empty_returns_error() {
+        assert!(probe_bytes(&[]).is_err());
+    }
+
+    #[test]
+    fn probe_garbage_returns_error() {
+        assert!(probe_bytes(&[0x00; 100]).is_err());
+    }
+
+    // ─── Benchmark ───────────────────────────────────────────────────
+
+    #[test]
+    fn benchmark_jpeg_produces_entries() {
+        let input = test_image_jpeg(256, 256);
+        let params = CompressParams::default();
+
+        let result = benchmark_bytes(&input, &params).unwrap();
+
+        assert_eq!(result.width, 256);
+        assert_eq!(result.height, 256);
+        assert_eq!(result.format, DetectedFormat::Jpeg);
+        assert_eq!(result.original_size, input.len());
+
+        assert!(result.entries.len() >= 5, "Got {} entries", result.entries.len());
+        assert!(result.entries[0].quality > result.entries.last().unwrap().quality);
+        assert!(result.entries[0].size_bytes >= result.entries.last().unwrap().size_bytes);
+        assert!(result.recommended_quality >= 20 && result.recommended_quality <= 95);
+    }
+
+    #[test]
+    fn benchmark_png_produces_single_entry() {
+        let input = minimal_png();
+        let params = CompressParams::default();
+
+        let result = benchmark_bytes(&input, &params).unwrap();
+        assert_eq!(result.entries.len(), 1);
+    }
+
+    #[test]
+    fn benchmark_with_resize() {
+        let input = test_image_jpeg(512, 512);
+        let mut params = CompressParams::default();
+        params.max_width = 128;
+
+        let result = benchmark_bytes(&input, &params).unwrap();
+
+        assert_eq!(result.width, 128);
+        assert_eq!(result.height, 128);
+    }
+
+    // ─── find_recommended_quality edge cases ─────────────────────────
+
+    #[test]
+    fn recommended_quality_single_entry() {
+        let entries = vec![crate::compress::BenchmarkEntry {
+            quality: 80,
+            size_bytes: 50000,
+            ratio: 0.5,
+            encode_ms: 10,
+        }];
+        let rec = find_recommended_quality(&entries, 100000);
+        assert_eq!(rec, 80);
+    }
+
+    #[test]
+    fn recommended_quality_empty_entries() {
+        let entries: Vec<crate::compress::BenchmarkEntry> = vec![];
+        let rec = find_recommended_quality(&entries, 100000);
+        assert_eq!(rec, 80); // fallback
+    }
+
+    // ─── ABI Version ────────────────────────────────────────────────
+
+    #[test]
+    fn abi_version_is_nonzero() {
+        assert!(crate::ABI_VERSION > 0);
+    }
+}

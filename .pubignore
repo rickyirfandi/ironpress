@@ -1,0 +1,19 @@
+# Build artifacts
+.dart_tool/
+build/
+
+# Rust build output (source kept, compiled binaries are platform-specific)
+rust/target/
+
+# CI/CD and scripts
+.github/
+scripts/
+
+# iOS build artifacts (but keep Frameworks/ and podspec)
+ios/.symlinks/
+ios/Pods/
+ios/Flutter/
+
+# macOS build artifacts (but keep libs/ and podspec)
+macos/Flutter/
+macos/Pods/
