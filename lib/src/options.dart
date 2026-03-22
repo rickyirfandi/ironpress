@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:meta/meta.dart';
+import 'package:flutter/foundation.dart' show immutable;
 
 // ─── Shared utility ──────────────────────────────────────────────────────────
 
