@@ -5,10 +5,10 @@ description: >
   Accepts JPEG, PNG, WebP, GIF, BMP, TIFF as input.
   Features binary-search file size targeting, batch processing,
   and consistent cross-platform output.
-version: 0.1.1
-homepage: https://github.com/nicearma/ironpress
-repository: https://github.com/nicearma/ironpress
-issue_tracker: https://github.com/nicearma/ironpress/issues
+version: 0.1.0
+homepage: https://github.com/rickyirfandi/ironpress
+repository: https://github.com/rickyirfandi/ironpress
+issue_tracker: https://github.com/rickyirfandi/ironpress/issues
 topics:
   - image-compression
   - image-processing

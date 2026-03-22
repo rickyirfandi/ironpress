@@ -1189,7 +1189,7 @@ class CompressException implements Exception {
         return 'The image may be corrupt or the device ran out of memory for this item. '
             'Other batch items are unaffected.';
       case -100:
-        return 'Internal error. Please file a bug at https://github.com/nicearma/ironpress/issues.';
+        return 'Internal error. Please file a bug at https://github.com/rickyirfandi/ironpress/issues.';
       default:
         return '';
     }

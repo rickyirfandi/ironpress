@@ -1,23 +1,3 @@
-## 0.1.1
-
-### Bug fixes
-- Fixed resource leak in `compressBatch` with progress callbacks: `ReceivePort`s were
-  not closed if `Isolate.spawn()` raised an exception. Ports are now always closed in a
-  `finally` block.
-
-### API improvements
-- Renamed `Ironpress.probe(path)` → `Ironpress.probeFile(path)` to be consistent with
-  `probeBytes`. The old name is kept as a `@Deprecated` alias.
-- Renamed `Ironpress.benchmark(path)` → `Ironpress.benchmarkFile(path)` for the same
-  reason. The old name is kept as a `@Deprecated` alias.
-- `compressFile`, `compressFileToFile`, `compressBytes`, and `compressBatch` now throw
-  `ArgumentError` immediately when `quality` or `minQuality` is outside 0–100, instead
-  of silently clamping to the nearest boundary.
-- `JpegOptions`, `PngOptions`, and `CompressPreset` are now annotated `@immutable`,
-  which lets the analyzer warn if a mutable field is accidentally introduced.
-
----
-
 ## 0.1.0
 
 **Initial release.**
@@ -32,9 +12,19 @@
 - `Ironpress.compressFileToFile` — compress file-to-file with no in-memory byte copy
 - `Ironpress.compressBytes` — compress an in-memory `Uint8List`
 - `Ironpress.compressBatch` — parallel batch compression with progress callbacks and cancellation support
-- `Ironpress.probe` / `Ironpress.probeBytes` — read image dimensions and format without decoding pixels
-- `Ironpress.benchmark` / `Ironpress.benchmarkBytes` — sweep quality levels to generate a compression/size curve
+- `Ironpress.probeFile` / `Ironpress.probeBytes` — read image dimensions and format without decoding pixels
+- `Ironpress.benchmarkFile` / `Ironpress.benchmarkBytes` — sweep quality levels to generate a compression/size curve
 - `Ironpress.nativeVersion` — verify the loaded native library version
+
+### Robustness
+- `ReceivePort`s in `compressBatch` with progress callbacks are always closed in a `finally` block
+- `compressFile`, `compressFileToFile`, `compressBytes`, and `compressBatch` throw `ArgumentError` immediately when `quality` or `minQuality` is outside 0–100
+- `JpegOptions`, `PngOptions`, and `CompressPreset` are annotated `@immutable`
+
+### Example app
+- Comprehensive example with 9 demo screens covering 100% of the public API
+- Visual before/after comparisons, interactive sliders, bar charts, and progress indicators
+- Screens: basic compression, quality presets, target file size, format comparison, batch processing, probe metadata, benchmark, advanced options (JPEG/PNG), file I/O
 
 ### Key features
 - **Binary-search target file size** (`maxFileSize`): the engine loops entirely in Rust — single FFI call, no round-trips

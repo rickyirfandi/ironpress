@@ -5,9 +5,9 @@ Pod::Spec.new do |s|
   s.description      = <<-DESC
     Flutter plugin providing Rust-powered image compression.
   DESC
-  s.homepage         = 'https://github.com/nicearma/ironpress'
+  s.homepage         = 'https://github.com/rickyirfandi/ironpress'
   s.license          = { :type => 'MIT', :file => '../LICENSE' }
-  s.author           = { 'Ricky' => 'dev@nicearma.dev' }
+  s.author           = { 'Ricky Irfandi' => 'dev@rickyirfandi.dev' }
   s.source           = { :path => '.' }
 
   s.osx.deployment_target = '10.15'

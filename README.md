@@ -1,7 +1,7 @@
 # ironpress
 
 [![pub package](https://img.shields.io/pub/v/ironpress.svg)](https://pub.dev/packages/ironpress)
-[![Tests](https://github.com/nicearma/ironpress/actions/workflows/test.yml/badge.svg)](https://github.com/nicearma/ironpress/actions/workflows/test.yml)
+[![Tests](https://github.com/rickyirfandi/ironpress/actions/workflows/test.yml/badge.svg)](https://github.com/rickyirfandi/ironpress/actions/workflows/test.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **High-performance image compression for Flutter, powered by Rust.**
