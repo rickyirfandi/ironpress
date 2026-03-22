@@ -11,10 +11,10 @@ repository: https://github.com/nicearma/ironpress
 issue_tracker: https://github.com/nicearma/ironpress/issues
 topics:
   - image-compression
-  - rust
-  - ffi
-  - performance
   - image-processing
+  - jpeg
+  - png
+  - webp
 
 environment:
   sdk: ^3.5.0
