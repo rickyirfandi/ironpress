@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:meta/meta.dart';
+
 // ─── Shared utility ──────────────────────────────────────────────────────────
 
 String formatBytes(int bytes) {
@@ -55,6 +57,7 @@ enum ChromaSubsampling {
 ///
 /// These expose mozjpeg's powerful features that most Flutter packages
 /// don't offer. All have sensible defaults.
+@immutable
 class JpegOptions {
   const JpegOptions({
     this.progressive = true,
@@ -76,6 +79,7 @@ class JpegOptions {
 }
 
 /// Advanced PNG optimization options.
+@immutable
 class PngOptions {
   const PngOptions({
     this.optimizationLevel = 2,
@@ -111,6 +115,7 @@ class PngOptions {
 ///   maxWidth: 1280, // override just this
 /// );
 /// ```
+@immutable
 class CompressPreset {
   const CompressPreset._({
     required this.quality,

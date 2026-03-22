@@ -1,3 +1,23 @@
+## 0.1.1
+
+### Bug fixes
+- Fixed resource leak in `compressBatch` with progress callbacks: `ReceivePort`s were
+  not closed if `Isolate.spawn()` raised an exception. Ports are now always closed in a
+  `finally` block.
+
+### API improvements
+- Renamed `Ironpress.probe(path)` → `Ironpress.probeFile(path)` to be consistent with
+  `probeBytes`. The old name is kept as a `@Deprecated` alias.
+- Renamed `Ironpress.benchmark(path)` → `Ironpress.benchmarkFile(path)` for the same
+  reason. The old name is kept as a `@Deprecated` alias.
+- `compressFile`, `compressFileToFile`, `compressBytes`, and `compressBatch` now throw
+  `ArgumentError` immediately when `quality` or `minQuality` is outside 0–100, instead
+  of silently clamping to the nearest boundary.
+- `JpegOptions`, `PngOptions`, and `CompressPreset` are now annotated `@immutable`,
+  which lets the analyzer warn if a mutable field is accidentally introduced.
+
+---
+
 ## 0.1.0
 
 **Initial release.**

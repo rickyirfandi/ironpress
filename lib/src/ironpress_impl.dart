@@ -12,6 +12,32 @@ import 'options.dart';
 /// Increment both sides when any #[repr(C)] struct layout changes.
 const int _expectedAbiVersion = 1;
 
+/// Error code used when the batch progress isolate crashes unexpectedly.
+const int _isolateCrashCode = -100;
+
+/// Validates quality parameters before passing them to the native engine.
+///
+/// Throws [ArgumentError] if [quality] or [minQuality] are outside 0–100.
+/// Callers pass the explicitly-provided values (nullable) so that only
+/// values the user actually supplied are validated; preset and default
+/// values are already guaranteed to be in range.
+void _validateQuality({int? quality, int? minQuality}) {
+  if (quality != null && (quality < 0 || quality > 100)) {
+    throw ArgumentError.value(
+      quality,
+      'quality',
+      'must be in the range 0–100',
+    );
+  }
+  if (minQuality != null && (minQuality < 0 || minQuality > 100)) {
+    throw ArgumentError.value(
+      minQuality,
+      'minQuality',
+      'must be in the range 0–100',
+    );
+  }
+}
+
 /// Cached bindings per isolate (each isolate has its own top-level state).
 NativeBindings? _cachedBindings;
 NativeBindings _getBindings() =>
@@ -128,6 +154,7 @@ class Ironpress {
     if (path.isEmpty) {
       throw ArgumentError.value(path, 'path', 'must not be empty');
     }
+    _validateQuality(quality: quality, minQuality: minQuality);
     final effectiveQuality = quality ?? preset?.quality ?? 80;
     final effectiveMaxWidth = maxWidth ?? preset?.maxWidth;
     final effectiveMaxHeight = maxHeight ?? preset?.maxHeight;
@@ -188,6 +215,7 @@ class Ironpress {
     if (outputPath.isEmpty) {
       throw ArgumentError.value(outputPath, 'outputPath', 'must not be empty');
     }
+    _validateQuality(quality: quality, minQuality: minQuality);
     final effectiveQuality = quality ?? preset?.quality ?? 80;
     final effectiveMaxWidth = maxWidth ?? preset?.maxWidth;
     final effectiveMaxHeight = maxHeight ?? preset?.maxHeight;
@@ -251,6 +279,7 @@ class Ironpress {
     if (data.isEmpty) {
       throw ArgumentError.value(data, 'data', 'must not be empty');
     }
+    _validateQuality(quality: quality, minQuality: minQuality);
     final effectiveQuality = quality ?? preset?.quality ?? 80;
     final effectiveMaxWidth = maxWidth ?? preset?.maxWidth;
     final effectiveMaxHeight = maxHeight ?? preset?.maxHeight;
@@ -325,6 +354,7 @@ class Ironpress {
     void Function(int completed, int total)? onProgress,
     CancellationToken? cancellationToken,
   }) async {
+    _validateQuality(quality: quality, minQuality: minQuality);
     final effectiveQuality = quality ?? preset?.quality ?? 80;
     final effectiveMaxWidth = maxWidth ?? preset?.maxWidth;
     final effectiveMaxHeight = maxHeight ?? preset?.maxHeight;
@@ -405,87 +435,88 @@ class Ironpress {
     final resultPort = ReceivePort();
     final errorPort = ReceivePort();
 
-    progressPort.listen((message) {
-      if (message is int) {
-        onProgress(message, total);
-      }
-    });
+    // Ports must be closed regardless of whether spawn succeeds or fails,
+    // otherwise they leak OS resources.
+    try {
+      progressPort.listen((message) {
+        if (message is int) {
+          onProgress(message, total);
+        }
+      });
 
-    await Isolate.spawn(
-      (message) {
-        final args = message as List;
-        final specs = args[0] as List<_BatchInputSpec>;
-        final progressSend = args[1] as SendPort;
-        final resultSend = args[2] as SendPort;
-        final params = args[3] as Map<String, dynamic>;
+      await Isolate.spawn(
+        (message) {
+          final args = message as List;
+          final specs = args[0] as List<_BatchInputSpec>;
+          final progressSend = args[1] as SendPort;
+          final resultSend = args[2] as SendPort;
+          final params = args[3] as Map<String, dynamic>;
 
-        final result = _compressBatchSync(
-          specs,
-          quality: params['quality'] as int,
-          maxWidth: params['maxWidth'] as int?,
-          maxHeight: params['maxHeight'] as int?,
-          maxFileSize: params['maxFileSize'] as int?,
-          minQuality: params['minQuality'] as int,
-          allowResize: params['allowResize'] as bool,
-          format: params['format'] as CompressFormat,
-          keepMetadata: params['keepMetadata'] as bool,
-          jpeg: params['jpeg'] as JpegOptions,
-          png: params['png'] as PngOptions,
-          threadCount: params['threadCount'] as int,
-          chunkSize: params['chunkSize'] as int,
-          progressSendPort: progressSend,
-        );
+          final result = _compressBatchSync(
+            specs,
+            quality: params['quality'] as int,
+            maxWidth: params['maxWidth'] as int?,
+            maxHeight: params['maxHeight'] as int?,
+            maxFileSize: params['maxFileSize'] as int?,
+            minQuality: params['minQuality'] as int,
+            allowResize: params['allowResize'] as bool,
+            format: params['format'] as CompressFormat,
+            keepMetadata: params['keepMetadata'] as bool,
+            jpeg: params['jpeg'] as JpegOptions,
+            png: params['png'] as PngOptions,
+            threadCount: params['threadCount'] as int,
+            chunkSize: params['chunkSize'] as int,
+            progressSendPort: progressSend,
+          );
 
-        resultSend.send(result);
-      },
-      [
-        inputSpecs,
-        progressPort.sendPort,
-        resultPort.sendPort,
-        {
-          'quality': quality,
-          'maxWidth': maxWidth,
-          'maxHeight': maxHeight,
-          'maxFileSize': maxFileSize,
-          'minQuality': minQuality,
-          'allowResize': allowResize,
-          'format': format,
-          'keepMetadata': keepMetadata,
-          'jpeg': jpeg,
-          'png': png,
-          'threadCount': threadCount,
-          'chunkSize': chunkSize,
+          resultSend.send(result);
         },
-      ],
-      onError: errorPort.sendPort,
-    );
+        [
+          inputSpecs,
+          progressPort.sendPort,
+          resultPort.sendPort,
+          {
+            'quality': quality,
+            'maxWidth': maxWidth,
+            'maxHeight': maxHeight,
+            'maxFileSize': maxFileSize,
+            'minQuality': minQuality,
+            'allowResize': allowResize,
+            'format': format,
+            'keepMetadata': keepMetadata,
+            'jpeg': jpeg,
+            'png': png,
+            'threadCount': threadCount,
+            'chunkSize': chunkSize,
+          },
+        ],
+        onError: errorPort.sendPort,
+      );
 
-    // Race result vs isolate error to avoid hanging if the isolate crashes.
-    final resultFuture = resultPort.first;
-    final errorFuture = errorPort.first;
+      // Race result vs isolate error to avoid hanging if the isolate crashes.
+      final first = await Future.any([resultPort.first, errorPort.first]);
 
-    final first = await Future.any([resultFuture, errorFuture]);
+      if (first is BatchCompressResult) {
+        onProgress(total, total);
+        return first;
+      }
 
-    progressPort.close();
-    resultPort.close();
-    errorPort.close();
-
-    if (first is BatchCompressResult) {
-      onProgress(total, total);
-      return first;
+      // Isolate error — first is [errorMessage, stackTrace]
+      final errorInfo = first as List;
+      throw CompressException(
+        _isolateCrashCode,
+        'Batch compression isolate crashed: ${errorInfo[0]}',
+      );
+    } finally {
+      progressPort.close();
+      resultPort.close();
+      errorPort.close();
     }
-
-    // Isolate error — first is [errorMessage, stackTrace]
-    final errorInfo = first as List;
-    throw CompressException(
-      -100,
-      'Batch compression isolate crashed: ${errorInfo[0]}',
-    );
   }
 
   // ─── Probe: Quick Metadata ───────────────────────────────────────────
 
-  /// Read image metadata without decoding pixel data.
+  /// Read image metadata from a file without decoding pixel data.
   ///
   /// Much faster than compression — useful for validating images before
   /// upload or checking resolution before deciding whether to resize.
@@ -494,7 +525,7 @@ class Ironpress {
   /// Throws [CompressException] if the file cannot be read or parsed.
   ///
   /// ```dart
-  /// final info = await Ironpress.probe('/path/to/photo.jpg');
+  /// final info = await Ironpress.probeFile('/path/to/photo.jpg');
   /// print(info); // ImageProbe(4000x3000, JPEG, 4.2 MB, 12.0MP, EXIF)
   ///
   /// if (info.megapixels > 12) {
@@ -502,7 +533,7 @@ class Ironpress {
   ///   await Ironpress.compressFile(path, preset: CompressPreset.medium);
   /// }
   /// ```
-  static Future<ImageProbe> probe(String path) async {
+  static Future<ImageProbe> probeFile(String path) async {
     if (path.isEmpty) {
       throw ArgumentError.value(path, 'path', 'must not be empty');
     }
@@ -536,9 +567,14 @@ class Ironpress {
     });
   }
 
-  /// Read image metadata from bytes without decoding.
+  /// Deprecated. Use [probeFile] instead.
+  @Deprecated('Use probeFile instead')
+  static Future<ImageProbe> probe(String path) => probeFile(path);
+
+  /// Read image metadata from bytes without decoding pixel data.
   ///
   /// Throws [ArgumentError] if [data] is empty.
+  /// Throws [CompressException] if the data cannot be parsed.
   static Future<ImageProbe> probeBytes(Uint8List data) async {
     if (data.isEmpty) {
       throw ArgumentError.value(data, 'data', 'must not be empty');
@@ -587,7 +623,7 @@ class Ironpress {
   /// Throws [CompressException] if the file cannot be read or parsed.
   ///
   /// ```dart
-  /// final bench = await Ironpress.benchmark('/path/to/photo.jpg');
+  /// final bench = await Ironpress.benchmarkFile('/path/to/photo.jpg');
   /// print(bench);
   /// // Benchmark(4.2 MB, 4000x3000, JPEG, recommended: q78)
   /// //   q95: 1.2 MB (70.5%, 210ms)
@@ -596,7 +632,7 @@ class Ironpress {
   /// //   q65: 280 KB (93.3%, 155ms)
   /// //   ...
   /// ```
-  static Future<BenchmarkResult> benchmark(
+  static Future<BenchmarkResult> benchmarkFile(
     String path, {
     int? maxWidth,
     int? maxHeight,
@@ -612,6 +648,15 @@ class Ironpress {
       );
     });
   }
+
+  /// Deprecated. Use [benchmarkFile] instead.
+  @Deprecated('Use benchmarkFile instead')
+  static Future<BenchmarkResult> benchmark(
+    String path, {
+    int? maxWidth,
+    int? maxHeight,
+  }) =>
+      benchmarkFile(path, maxWidth: maxWidth, maxHeight: maxHeight);
 
   /// Run a quality sweep on raw image bytes.
   ///

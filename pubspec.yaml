@@ -5,7 +5,7 @@ description: >
   Accepts JPEG, PNG, WebP, GIF, BMP, TIFF as input.
   Features binary-search file size targeting, batch processing,
   and consistent cross-platform output.
-version: 0.1.0
+version: 0.1.1
 homepage: https://github.com/nicearma/ironpress
 repository: https://github.com/nicearma/ironpress
 issue_tracker: https://github.com/nicearma/ironpress/issues
@@ -24,6 +24,7 @@ dependencies:
   ffi: ^2.1.0
   flutter:
     sdk: flutter
+  meta: ^1.9.0
 
 dev_dependencies:
   flutter_test:
