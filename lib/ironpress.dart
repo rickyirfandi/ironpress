@@ -8,6 +8,7 @@ export 'src/options.dart'
     show
         CompressFormat,
         ChromaSubsampling,
+        CompressPreset,
         JpegOptions,
         PngOptions,
         CompressInput,

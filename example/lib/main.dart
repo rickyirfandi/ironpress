@@ -178,7 +178,64 @@ class _CompressDemoState extends State<CompressDemo> {
     }
   }
 
-  // ─── Example 4: Version check ──────────────────────────────────────
+  // ─── Example 4: Probe ──────────────────────────────────────────────
+
+  Future<void> _probeImage() async {
+    setState(() => _loading = true);
+    try {
+      final bytes = await _loadTestImage();
+      final info = await Ironpress.probeBytes(bytes);
+      _appendLog('Probe:');
+      _appendLog('  Format: ${info.format.name}');
+      _appendLog('  Dimensions: ${info.width}×${info.height}');
+      _appendLog('  Megapixels: ${info.megapixels.toStringAsFixed(2)} MP');
+      _appendLog('  File size: ${bytes.length} bytes');
+      _appendLog('  Has EXIF: ${info.hasExif}');
+    } catch (e) {
+      _appendLog('Error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  // ─── Example 5: Benchmark (quality sweep) ──────────────────────────
+
+  Future<void> _benchmark() async {
+    setState(() => _loading = true);
+    try {
+      final bytes = await _loadTestImage();
+      _appendLog('Running benchmark (quality sweep)...');
+      final bench = await Ironpress.benchmarkBytes(bytes);
+      _appendLog(bench.toString());
+    } catch (e) {
+      _appendLog('Error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  // ─── Example 6: WebP conversion ────────────────────────────────────
+
+  Future<void> _webpCompress() async {
+    setState(() => _loading = true);
+    try {
+      final bytes = await _loadTestImage();
+      final result = await Ironpress.compressBytes(
+        bytes,
+        quality: 80,
+        format: CompressFormat.webpLossy,
+      );
+      _appendLog('WebP (lossy): $result');
+      _appendLog('  Output format: WebP');
+      _appendLog('  Size: ${result.compressedSize} bytes');
+    } catch (e) {
+      _appendLog('Error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  // ─── Example 7: Version check ──────────────────────────────────────
 
   void _checkVersion() {
     try {
@@ -213,6 +270,18 @@ class _CompressDemoState extends State<CompressDemo> {
                 ElevatedButton(
                   onPressed: _loading ? null : _batchCompress,
                   child: const Text('Batch x5'),
+                ),
+                ElevatedButton(
+                  onPressed: _loading ? null : _probeImage,
+                  child: const Text('Probe'),
+                ),
+                ElevatedButton(
+                  onPressed: _loading ? null : _benchmark,
+                  child: const Text('Benchmark'),
+                ),
+                ElevatedButton(
+                  onPressed: _loading ? null : _webpCompress,
+                  child: const Text('→ WebP'),
                 ),
                 OutlinedButton(
                   onPressed: _checkVersion,

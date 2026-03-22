@@ -331,8 +331,8 @@ void main() {
         expect(result.isSuccess, isTrue);
         expect(result.compressedSize, greaterThan(0));
       }
-      expect(batch.successCount, 3);
-      expect(batch.failureCount, 0);
+      expect(batch.successfulCount, 3);
+      expect(batch.failedCount, 0);
     });
 
     test('compressBatch reports progress via callback', () async {
@@ -347,7 +347,7 @@ void main() {
         batch = await Ironpress.compressBatch(
           inputs,
           quality: 80,
-          onProgress: (completed, total, _) {
+          onProgress: (completed, total) {
             progressUpdates.add(completed);
           },
         );
