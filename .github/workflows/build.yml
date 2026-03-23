@@ -245,6 +245,8 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
 
       - name: Validate package
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/linux/libs
         run: |
           flutter pub get
           flutter analyze
