@@ -12,7 +12,7 @@ Pod::Spec.new do |s|
   s.author           = { 'Ricky Irfandi' => 'dev@rickyirfandi.dev' }
   s.source           = { :path => '.' }
 
-  s.ios.deployment_target = '12.0'
+  s.ios.deployment_target = '13.0'
 
   # The precompiled xcframework is placed at:
   #   ios/Frameworks/ironpress.xcframework/
