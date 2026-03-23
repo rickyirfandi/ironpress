@@ -9,8 +9,11 @@ const String _libName = 'ironpress';
 /// Throws [StateError] with actionable message if the library cannot be loaded.
 DynamicLibrary loadNativeLibrary() {
   if (Platform.isAndroid) {
-    return _tryOpen('lib$_libName.so', 'Android',
-        'Ensure the Rust .so is included in your APK\'s jniLibs.');
+    return _tryOpen(
+      'lib$_libName.so',
+      'Android',
+      'Ensure the Rust .so is included in your APK\'s jniLibs.',
+    );
   }
 
   if (Platform.isIOS) {
@@ -18,18 +21,27 @@ DynamicLibrary loadNativeLibrary() {
   }
 
   if (Platform.isMacOS) {
-    return _tryOpen('lib$_libName.dylib', 'macOS',
-        'Run the Rust build script and ensure the .dylib is bundled via CocoaPods.');
+    return _tryOpen(
+      'lib$_libName.dylib',
+      'macOS',
+      'Run the Rust build script and ensure the .dylib is bundled via CocoaPods.',
+    );
   }
 
   if (Platform.isLinux) {
-    return _tryOpen('lib$_libName.so', 'Linux',
-        'Run the Rust build script and place the .so next to your executable.');
+    return _tryOpen(
+      'lib$_libName.so',
+      'Linux',
+      'Run the Rust build script and place the .so next to your executable.',
+    );
   }
 
   if (Platform.isWindows) {
-    return _tryOpen('$_libName.dll', 'Windows',
-        'Run the Rust build script and place the .dll next to your executable.');
+    return _tryOpen(
+      '$_libName.dll',
+      'Windows',
+      'Run the Rust build script and place the .dll next to your executable.',
+    );
   }
 
   throw UnsupportedError(

@@ -23,11 +23,7 @@ const int _isolateCrashCode = -100;
 /// values are already guaranteed to be in range.
 void _validateQuality({int? quality, int? minQuality}) {
   if (quality != null && (quality < 0 || quality > 100)) {
-    throw ArgumentError.value(
-      quality,
-      'quality',
-      'must be in the range 0–100',
-    );
+    throw ArgumentError.value(quality, 'quality', 'must be in the range 0–100');
   }
   if (minQuality != null && (minQuality < 0 || minQuality > 100)) {
     throw ArgumentError.value(
@@ -364,13 +360,16 @@ class Ironpress {
       return const BatchCompressResult(results: [], elapsedMs: 0);
     }
 
-    final inputSpecs = inputs
-        .map((i) => _BatchInputSpec(
-              path: i.path,
-              data: i.data,
-              outputPath: i.outputPath,
-            ))
-        .toList();
+    final inputSpecs =
+        inputs
+            .map(
+              (i) => _BatchInputSpec(
+                path: i.path,
+                data: i.data,
+                outputPath: i.outputPath,
+              ),
+            )
+            .toList();
 
     if (onProgress != null) {
       return _compressBatchWithProgress(
@@ -546,9 +545,10 @@ class Ironpress {
         bindings.probeFile(pathPtr, outPtr);
 
         if (outPtr.ref.errorCode != 0) {
-          final msg = outPtr.ref.errorMessage != nullptr
-              ? outPtr.ref.errorMessage.toDartString()
-              : 'Probe failed (code ${outPtr.ref.errorCode})';
+          final msg =
+              outPtr.ref.errorMessage != nullptr
+                  ? outPtr.ref.errorMessage.toDartString()
+                  : 'Probe failed (code ${outPtr.ref.errorCode})';
           throw CompressException(outPtr.ref.errorCode, msg);
         }
 
@@ -589,9 +589,10 @@ class Ironpress {
         bindings.probeBuffer(nativeData, data.length, outPtr);
 
         if (outPtr.ref.errorCode != 0) {
-          final msg = outPtr.ref.errorMessage != nullptr
-              ? outPtr.ref.errorMessage.toDartString()
-              : 'Probe failed (code ${outPtr.ref.errorCode})';
+          final msg =
+              outPtr.ref.errorMessage != nullptr
+                  ? outPtr.ref.errorMessage.toDartString()
+                  : 'Probe failed (code ${outPtr.ref.errorCode})';
           throw CompressException(outPtr.ref.errorCode, msg);
         }
 
@@ -641,11 +642,7 @@ class Ironpress {
       throw ArgumentError.value(path, 'path', 'must not be empty');
     }
     return Isolate.run(() {
-      return _benchmarkFileSync(
-        path,
-        maxWidth: maxWidth,
-        maxHeight: maxHeight,
-      );
+      return _benchmarkFileSync(path, maxWidth: maxWidth, maxHeight: maxHeight);
     });
   }
 
@@ -655,8 +652,7 @@ class Ironpress {
     String path, {
     int? maxWidth,
     int? maxHeight,
-  }) =>
-      benchmarkFile(path, maxWidth: maxWidth, maxHeight: maxHeight);
+  }) => benchmarkFile(path, maxWidth: maxWidth, maxHeight: maxHeight);
 
   /// Run a quality sweep on raw image bytes.
   ///
@@ -905,9 +901,10 @@ class Ironpress {
       final ref = outPtr.ref;
 
       if (ref.errorCode != 0) {
-        final msg = ref.errorMessage != nullptr
-            ? ref.errorMessage.toDartString()
-            : 'Unknown error (code ${ref.errorCode})';
+        final msg =
+            ref.errorMessage != nullptr
+                ? ref.errorMessage.toDartString()
+                : 'Unknown error (code ${ref.errorCode})';
         throw CompressException(ref.errorCode, msg);
       }
 
@@ -945,21 +942,24 @@ class Ironpress {
       final ref = outPtr.ref;
 
       if (ref.errorCode != 0) {
-        final msg = ref.errorMessage != nullptr
-            ? ref.errorMessage.toDartString()
-            : 'Benchmark failed (code ${ref.errorCode})';
+        final msg =
+            ref.errorMessage != nullptr
+                ? ref.errorMessage.toDartString()
+                : 'Benchmark failed (code ${ref.errorCode})';
         throw CompressException(ref.errorCode, msg);
       }
 
       final entries = <BenchmarkEntry>[];
       for (var i = 0; i < ref.entryCount; i++) {
         final e = ref.entries[i];
-        entries.add(BenchmarkEntry(
-          quality: e.quality,
-          sizeBytes: e.sizeBytes,
-          ratio: e.ratio,
-          encodeMs: e.encodeMs,
-        ));
+        entries.add(
+          BenchmarkEntry(
+            quality: e.quality,
+            sizeBytes: e.sizeBytes,
+            ratio: e.ratio,
+            encodeMs: e.encodeMs,
+          ),
+        );
       }
 
       return BenchmarkResult(
@@ -1077,21 +1077,24 @@ class Ironpress {
               final native = batchRef.results[i];
 
               if (native.errorCode != 0) {
-                final msg = native.errorMessage != nullptr
-                    ? native.errorMessage.toDartString()
-                    : 'Error (code ${native.errorCode})';
-                allResults.add(CompressResult(
-                  data: null,
-                  originalSize: native.originalSize,
-                  compressedSize: 0,
-                  width: 0,
-                  height: 0,
-                  qualityUsed: 0,
-                  iterations: 0,
-                  resizedToFit: false,
-                  errorCode: native.errorCode,
-                  errorMessage: msg,
-                ));
+                final msg =
+                    native.errorMessage != nullptr
+                        ? native.errorMessage.toDartString()
+                        : 'Error (code ${native.errorCode})';
+                allResults.add(
+                  CompressResult(
+                    data: null,
+                    originalSize: native.originalSize,
+                    compressedSize: 0,
+                    width: 0,
+                    height: 0,
+                    qualityUsed: 0,
+                    iterations: 0,
+                    resizedToFit: false,
+                    errorCode: native.errorCode,
+                    errorMessage: msg,
+                  ),
+                );
               } else {
                 Uint8List? dartData;
                 if (native.data != nullptr && native.dataLen > 0) {
@@ -1100,16 +1103,18 @@ class Ironpress {
                   );
                 }
 
-                allResults.add(CompressResult(
-                  data: dartData,
-                  originalSize: native.originalSize,
-                  compressedSize: native.dataLen,
-                  width: native.width,
-                  height: native.height,
-                  qualityUsed: native.qualityUsed,
-                  iterations: native.iterations,
-                  resizedToFit: native.resizedToFit != 0,
-                ));
+                allResults.add(
+                  CompressResult(
+                    data: dartData,
+                    originalSize: native.originalSize,
+                    compressedSize: native.dataLen,
+                    width: native.width,
+                    height: native.height,
+                    qualityUsed: native.qualityUsed,
+                    iterations: native.iterations,
+                    resizedToFit: native.resizedToFit != 0,
+                  ),
+                );
               }
             }
 

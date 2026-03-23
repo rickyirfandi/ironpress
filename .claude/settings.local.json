@@ -14,7 +14,8 @@
       "Bash(find /c/PROJECT/ironpress/test -type f -name *.dart)",
       "WebSearch",
       "WebFetch(domain:pub.dev)",
-      "Bash(dart format:*)"
+      "Bash(dart format:*)",
+      "Bash(flutter pub:*)"
     ]
   }
 }

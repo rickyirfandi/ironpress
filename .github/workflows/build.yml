@@ -38,16 +38,10 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 
-      - name: Set up Android NDK
-        id: setup-ndk
-        uses: android-actions/setup-android@v3
-        with:
-          packages: ndk;27.0.12077973
-
       - name: Build Android library
         working-directory: rust
         env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
         run: |
           cargo ndk \
             --target ${{ matrix.target }} \

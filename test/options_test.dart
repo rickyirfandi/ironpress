@@ -264,9 +264,24 @@ void main() {
         height: 3000,
         format: ImageFormat.jpeg,
         entries: [
-          BenchmarkEntry(quality: 95, sizeBytes: 1800000, ratio: 0.43, encodeMs: 45),
-          BenchmarkEntry(quality: 80, sizeBytes: 380000, ratio: 0.09, encodeMs: 38),
-          BenchmarkEntry(quality: 60, sizeBytes: 180000, ratio: 0.04, encodeMs: 32),
+          BenchmarkEntry(
+            quality: 95,
+            sizeBytes: 1800000,
+            ratio: 0.43,
+            encodeMs: 45,
+          ),
+          BenchmarkEntry(
+            quality: 80,
+            sizeBytes: 380000,
+            ratio: 0.09,
+            encodeMs: 38,
+          ),
+          BenchmarkEntry(
+            quality: 60,
+            sizeBytes: 180000,
+            ratio: 0.04,
+            encodeMs: 32,
+          ),
         ],
         recommendedQuality: 80,
       );

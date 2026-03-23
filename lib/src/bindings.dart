@@ -75,78 +75,81 @@ final class NativeBatchResult extends Struct {
 // ─── Native function typedefs ────────────────────────────────────────────────
 
 // compress_file(path, params, out) -> void
-typedef CompressFileNative = Void Function(
-  Pointer<Utf8> inputPath,
-  Pointer<NativeCompressParams> params,
-  Pointer<NativeCompressResult> out,
-);
-typedef CompressFileDart = void Function(
-  Pointer<Utf8> inputPath,
-  Pointer<NativeCompressParams> params,
-  Pointer<NativeCompressResult> out,
-);
+typedef CompressFileNative =
+    Void Function(
+      Pointer<Utf8> inputPath,
+      Pointer<NativeCompressParams> params,
+      Pointer<NativeCompressResult> out,
+    );
+typedef CompressFileDart =
+    void Function(
+      Pointer<Utf8> inputPath,
+      Pointer<NativeCompressParams> params,
+      Pointer<NativeCompressResult> out,
+    );
 
 // compress_buffer(data, len, params, out) -> void
-typedef CompressBufferNative = Void Function(
-  Pointer<Uint8> inputData,
-  Size inputLen,
-  Pointer<NativeCompressParams> params,
-  Pointer<NativeCompressResult> out,
-);
-typedef CompressBufferDart = void Function(
-  Pointer<Uint8> inputData,
-  int inputLen,
-  Pointer<NativeCompressParams> params,
-  Pointer<NativeCompressResult> out,
-);
+typedef CompressBufferNative =
+    Void Function(
+      Pointer<Uint8> inputData,
+      Size inputLen,
+      Pointer<NativeCompressParams> params,
+      Pointer<NativeCompressResult> out,
+    );
+typedef CompressBufferDart =
+    void Function(
+      Pointer<Uint8> inputData,
+      int inputLen,
+      Pointer<NativeCompressParams> params,
+      Pointer<NativeCompressResult> out,
+    );
 
 // compress_file_to_file(input, output, params, out) -> void
-typedef CompressFileToFileNative = Void Function(
-  Pointer<Utf8> inputPath,
-  Pointer<Utf8> outputPath,
-  Pointer<NativeCompressParams> params,
-  Pointer<NativeCompressResult> out,
-);
-typedef CompressFileToFileDart = void Function(
-  Pointer<Utf8> inputPath,
-  Pointer<Utf8> outputPath,
-  Pointer<NativeCompressParams> params,
-  Pointer<NativeCompressResult> out,
-);
+typedef CompressFileToFileNative =
+    Void Function(
+      Pointer<Utf8> inputPath,
+      Pointer<Utf8> outputPath,
+      Pointer<NativeCompressParams> params,
+      Pointer<NativeCompressResult> out,
+    );
+typedef CompressFileToFileDart =
+    void Function(
+      Pointer<Utf8> inputPath,
+      Pointer<Utf8> outputPath,
+      Pointer<NativeCompressParams> params,
+      Pointer<NativeCompressResult> out,
+    );
 
 // compress_batch(inputs, count, params, thread_count, chunk_size, out) -> void
-typedef CompressBatchNative = Void Function(
-  Pointer<NativeBatchInput> inputs,
-  Size count,
-  Pointer<NativeCompressParams> params,
-  Uint32 threadCount,
-  Uint32 chunkSize,
-  Pointer<NativeBatchResult> out,
-);
-typedef CompressBatchDart = void Function(
-  Pointer<NativeBatchInput> inputs,
-  int count,
-  Pointer<NativeCompressParams> params,
-  int threadCount,
-  int chunkSize,
-  Pointer<NativeBatchResult> out,
-);
+typedef CompressBatchNative =
+    Void Function(
+      Pointer<NativeBatchInput> inputs,
+      Size count,
+      Pointer<NativeCompressParams> params,
+      Uint32 threadCount,
+      Uint32 chunkSize,
+      Pointer<NativeBatchResult> out,
+    );
+typedef CompressBatchDart =
+    void Function(
+      Pointer<NativeBatchInput> inputs,
+      int count,
+      Pointer<NativeCompressParams> params,
+      int threadCount,
+      int chunkSize,
+      Pointer<NativeBatchResult> out,
+    );
 
 // free_compress_result(result)
-typedef FreeCompressResultNative = Void Function(
-  Pointer<NativeCompressResult> result,
-);
-typedef FreeCompressResultDart = void Function(
-  Pointer<NativeCompressResult> result,
-);
+typedef FreeCompressResultNative =
+    Void Function(Pointer<NativeCompressResult> result);
+typedef FreeCompressResultDart =
+    void Function(Pointer<NativeCompressResult> result);
 
 // free_batch_result(result)
-typedef FreeBatchResultNative = Void Function(
-  Pointer<NativeBatchResult> result,
-);
-typedef FreeBatchResultDart = void Function(
-  Pointer<NativeBatchResult> result,
-);
+typedef FreeBatchResultNative =
+    Void Function(Pointer<NativeBatchResult> result);
+typedef FreeBatchResultDart = void Function(Pointer<NativeBatchResult> result);
 
 // ─── Probe ───────────────────────────────────────────────────────────────────
 
@@ -168,26 +171,20 @@ final class NativeProbeResult extends Struct {
 }
 
 // probe_file(path, out) -> void
-typedef ProbeFileNative = Void Function(
-  Pointer<Utf8> path,
-  Pointer<NativeProbeResult> out,
-);
-typedef ProbeFileDart = void Function(
-  Pointer<Utf8> path,
-  Pointer<NativeProbeResult> out,
-);
+typedef ProbeFileNative =
+    Void Function(Pointer<Utf8> path, Pointer<NativeProbeResult> out);
+typedef ProbeFileDart =
+    void Function(Pointer<Utf8> path, Pointer<NativeProbeResult> out);
 
 // probe_buffer(data, len, out) -> void
-typedef ProbeBufferNative = Void Function(
-  Pointer<Uint8> data,
-  Size len,
-  Pointer<NativeProbeResult> out,
-);
-typedef ProbeBufferDart = void Function(
-  Pointer<Uint8> data,
-  int len,
-  Pointer<NativeProbeResult> out,
-);
+typedef ProbeBufferNative =
+    Void Function(
+      Pointer<Uint8> data,
+      Size len,
+      Pointer<NativeProbeResult> out,
+    );
+typedef ProbeBufferDart =
+    void Function(Pointer<Uint8> data, int len, Pointer<NativeProbeResult> out);
 
 typedef FreeProbeResultNative = Void Function(Pointer<NativeProbeResult> r);
 typedef FreeProbeResultDart = void Function(Pointer<NativeProbeResult> r);
@@ -227,37 +224,39 @@ final class NativeBenchmarkResult extends Struct {
 }
 
 // benchmark_file(path, params, out) -> void
-typedef BenchmarkFileNative = Void Function(
-  Pointer<Utf8> path,
-  Pointer<NativeCompressParams> params,
-  Pointer<NativeBenchmarkResult> out,
-);
-typedef BenchmarkFileDart = void Function(
-  Pointer<Utf8> path,
-  Pointer<NativeCompressParams> params,
-  Pointer<NativeBenchmarkResult> out,
-);
+typedef BenchmarkFileNative =
+    Void Function(
+      Pointer<Utf8> path,
+      Pointer<NativeCompressParams> params,
+      Pointer<NativeBenchmarkResult> out,
+    );
+typedef BenchmarkFileDart =
+    void Function(
+      Pointer<Utf8> path,
+      Pointer<NativeCompressParams> params,
+      Pointer<NativeBenchmarkResult> out,
+    );
 
 // benchmark_buffer(data, len, params, out) -> void
-typedef BenchmarkBufferNative = Void Function(
-  Pointer<Uint8> data,
-  Size len,
-  Pointer<NativeCompressParams> params,
-  Pointer<NativeBenchmarkResult> out,
-);
-typedef BenchmarkBufferDart = void Function(
-  Pointer<Uint8> data,
-  int len,
-  Pointer<NativeCompressParams> params,
-  Pointer<NativeBenchmarkResult> out,
-);
+typedef BenchmarkBufferNative =
+    Void Function(
+      Pointer<Uint8> data,
+      Size len,
+      Pointer<NativeCompressParams> params,
+      Pointer<NativeBenchmarkResult> out,
+    );
+typedef BenchmarkBufferDart =
+    void Function(
+      Pointer<Uint8> data,
+      int len,
+      Pointer<NativeCompressParams> params,
+      Pointer<NativeBenchmarkResult> out,
+    );
 
-typedef FreeBenchmarkResultNative = Void Function(
-  Pointer<NativeBenchmarkResult> r,
-);
-typedef FreeBenchmarkResultDart = void Function(
-  Pointer<NativeBenchmarkResult> r,
-);
+typedef FreeBenchmarkResultNative =
+    Void Function(Pointer<NativeBenchmarkResult> r);
+typedef FreeBenchmarkResultDart =
+    void Function(Pointer<NativeBenchmarkResult> r);
 
 // ironpress_version() -> char*
 typedef VersionNative = Pointer<Utf8> Function();
@@ -291,28 +290,38 @@ class NativeBindings {
     return NativeBindings._(
       lib.lookupFunction<CompressFileNative, CompressFileDart>('compress_file'),
       lib.lookupFunction<CompressBufferNative, CompressBufferDart>(
-          'compress_buffer'),
+        'compress_buffer',
+      ),
       lib.lookupFunction<CompressFileToFileNative, CompressFileToFileDart>(
-          'compress_file_to_file'),
+        'compress_file_to_file',
+      ),
       lib.lookupFunction<CompressBatchNative, CompressBatchDart>(
-          'compress_batch'),
+        'compress_batch',
+      ),
       lib.lookupFunction<FreeCompressResultNative, FreeCompressResultDart>(
-          'free_compress_result'),
+        'free_compress_result',
+      ),
       lib.lookupFunction<FreeBatchResultNative, FreeBatchResultDart>(
-          'free_batch_result'),
+        'free_batch_result',
+      ),
       lib.lookupFunction<ProbeFileNative, ProbeFileDart>('probe_file'),
       lib.lookupFunction<ProbeBufferNative, ProbeBufferDart>('probe_buffer'),
       lib.lookupFunction<FreeProbeResultNative, FreeProbeResultDart>(
-          'free_probe_result'),
+        'free_probe_result',
+      ),
       lib.lookupFunction<BenchmarkFileNative, BenchmarkFileDart>(
-          'benchmark_file'),
+        'benchmark_file',
+      ),
       lib.lookupFunction<BenchmarkBufferNative, BenchmarkBufferDart>(
-          'benchmark_buffer'),
+        'benchmark_buffer',
+      ),
       lib.lookupFunction<FreeBenchmarkResultNative, FreeBenchmarkResultDart>(
-          'free_benchmark_result'),
+        'free_benchmark_result',
+      ),
       lib.lookupFunction<VersionNative, VersionDart>('ironpress_version'),
       lib.lookupFunction<AbiVersionNative, AbiVersionDart>(
-          'ironpress_abi_version'),
+        'ironpress_abi_version',
+      ),
     );
   }
 

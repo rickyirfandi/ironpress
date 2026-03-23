@@ -81,9 +81,7 @@ class JpegOptions {
 /// Advanced PNG optimization options.
 @immutable
 class PngOptions {
-  const PngOptions({
-    this.optimizationLevel = 2,
-  });
+  const PngOptions({this.optimizationLevel = 2});
 
   /// Optimization level 0-6. Higher = slower but smaller output.
   ///
@@ -153,10 +151,7 @@ class CompressPreset {
   /// - JPEG quality: 92
   /// - No resize applied
   /// - Min quality floor: 70
-  static const high = CompressPreset._(
-    quality: 92,
-    minQuality: 70,
-  );
+  static const high = CompressPreset._(quality: 92, minQuality: 70);
 
   /// JPEG quality (0–100) for this preset.
   final int quality;
@@ -176,10 +171,10 @@ class CompressPreset {
 /// Input descriptor for batch compression.
 class CompressInput {
   const CompressInput({this.path, this.data, this.outputPath})
-      : assert(
-          (path != null) != (data != null),
-          'Exactly one of path or data must be provided',
-        );
+    : assert(
+        (path != null) != (data != null),
+        'Exactly one of path or data must be provided',
+      );
 
   /// File path to compress (mutually exclusive with [data]).
   final String? path;
@@ -278,12 +273,10 @@ class CompressResult {
   final String? errorMessage;
 
   /// Compression ratio (e.g., 0.35 means 65% reduction).
-  double get ratio =>
-      originalSize > 0 ? compressedSize / originalSize : 1.0;
+  double get ratio => originalSize > 0 ? compressedSize / originalSize : 1.0;
 
   /// Human-readable reduction percentage (e.g., "65.2%").
-  String get reductionPercent =>
-      '${((1.0 - ratio) * 100).toStringAsFixed(1)}%';
+  String get reductionPercent => '${((1.0 - ratio) * 100).toStringAsFixed(1)}%';
 
   /// Whether the compression completed successfully.
   bool get isSuccess => errorCode == null;
@@ -314,10 +307,7 @@ class CompressResult {
 ///
 /// Contains individual results for each input plus aggregate stats.
 class BatchCompressResult {
-  const BatchCompressResult({
-    required this.results,
-    required this.elapsedMs,
-  });
+  const BatchCompressResult({required this.results, required this.elapsedMs});
 
   /// Individual compression results, one per input.
   final List<CompressResult> results;
@@ -382,19 +372,27 @@ enum ImageFormat {
 
   static ImageFormat fromValue(int v) {
     switch (v) {
-      case 1: return jpeg;
-      case 2: return png;
-      case 3: return webp;
-      case 4: return webp;
-      default: return jpeg;
+      case 1:
+        return jpeg;
+      case 2:
+        return png;
+      case 3:
+        return webp;
+      case 4:
+        return webp;
+      default:
+        return jpeg;
     }
   }
 
   String get name {
     switch (this) {
-      case jpeg: return 'JPEG';
-      case png: return 'PNG';
-      case webp: return 'WebP';
+      case jpeg:
+        return 'JPEG';
+      case png:
+        return 'PNG';
+      case webp:
+        return 'WebP';
     }
   }
 }
@@ -465,8 +463,7 @@ class BenchmarkEntry {
   String get sizeFormatted => formatBytes(sizeBytes);
 
   /// Human-readable reduction.
-  String get reductionPercent =>
-      '${((1.0 - ratio) * 100).toStringAsFixed(1)}%';
+  String get reductionPercent => '${((1.0 - ratio) * 100).toStringAsFixed(1)}%';
 
   @override
   String toString() =>
@@ -506,8 +503,9 @@ class BenchmarkResult {
   String toString() {
     final buf = StringBuffer();
     buf.writeln(
-        'Benchmark(${formatBytes(originalSize)}, ${width}x$height, ${format.name}, '
-        'recommended: q$recommendedQuality)');
+      'Benchmark(${formatBytes(originalSize)}, ${width}x$height, ${format.name}, '
+      'recommended: q$recommendedQuality)',
+    );
     for (final entry in entries) {
       final marker =
           entry.quality == recommendedQuality ? '  ← recommended' : '';

@@ -2,8 +2,7 @@
 //
 // Uses mozjpeg (trellis quantization) for JPEG and oxipng for PNG.
 
-export 'src/ironpress_impl.dart'
-    show Ironpress, CompressException;
+export 'src/ironpress_impl.dart' show Ironpress, CompressException;
 export 'src/options.dart'
     show
         CompressFormat,

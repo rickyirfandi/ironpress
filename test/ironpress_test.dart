@@ -6,10 +6,7 @@ import 'package:ironpress/ironpress.dart';
 void main() {
   group('Input validation', () {
     test('compressFile throws on empty path', () async {
-      expect(
-        () => Ironpress.compressFile(''),
-        throwsA(isA<ArgumentError>()),
-      );
+      expect(() => Ironpress.compressFile(''), throwsA(isA<ArgumentError>()));
     });
 
     test('compressFileToFile throws on empty inputPath', () async {
@@ -34,10 +31,7 @@ void main() {
     });
 
     test('probeFile throws on empty path', () async {
-      expect(
-        () => Ironpress.probeFile(''),
-        throwsA(isA<ArgumentError>()),
-      );
+      expect(() => Ironpress.probeFile(''), throwsA(isA<ArgumentError>()));
     });
 
     test('probeBytes throws on empty data', () async {
@@ -48,10 +42,7 @@ void main() {
     });
 
     test('benchmarkFile throws on empty path', () async {
-      expect(
-        () => Ironpress.benchmarkFile(''),
-        throwsA(isA<ArgumentError>()),
-      );
+      expect(() => Ironpress.benchmarkFile(''), throwsA(isA<ArgumentError>()));
     });
 
     test('benchmarkBytes throws on empty data', () async {
@@ -93,10 +84,9 @@ void main() {
 
     test('compressBatch throws on out-of-range quality', () {
       expect(
-        () => Ironpress.compressBatch(
-          [CompressInput(data: Uint8List(1))],
-          quality: 200,
-        ),
+        () => Ironpress.compressBatch([
+          CompressInput(data: Uint8List(1)),
+        ], quality: 200),
         throwsA(isA<ArgumentError>()),
       );
     });
