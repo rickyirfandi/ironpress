@@ -48,9 +48,9 @@ class _TargetSizeScreenState extends State<TargetSizeScreen> {
       setState(() => _result = result);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       setState(() => _loading = false);
@@ -137,10 +137,11 @@ class _TargetSizeScreenState extends State<TargetSizeScreen> {
                       StatRow(
                         icon: Icons.check_circle_outline,
                         label: 'Met target',
-                        value: _result!.compressedSize <=
-                                (_targetKB * 1024).round()
-                            ? 'Yes'
-                            : 'No',
+                        value:
+                            _result!.compressedSize <=
+                                    (_targetKB * 1024).round()
+                                ? 'Yes'
+                                : 'No',
                       ),
                     ],
                   ),

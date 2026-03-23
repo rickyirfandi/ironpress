@@ -4,8 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-    branches:
-      - master
   workflow_dispatch:
 
 env:
@@ -222,7 +220,7 @@ jobs:
       - name: Assemble iOS xcframework
         run: |
           mkdir -p ios/Frameworks
-          cp -r artifacts/ios-xcframework/ironpress.xcframework ios/Frameworks/
+          cp -r artifacts/ios-xcframework ios/Frameworks/ironpress.xcframework
 
       - name: Verify structure
         run: |

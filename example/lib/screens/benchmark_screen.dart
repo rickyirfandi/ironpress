@@ -29,9 +29,9 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
       setState(() => _bench = bench);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       setState(() => _loading = false);
@@ -43,109 +43,107 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Benchmark')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _bench == null
+      body:
+          _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _bench == null
               ? const Center(child: Text('No data'))
               : SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Image Info',
-                                style: theme.textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 8),
-                              StatRow(
-                                icon: Icons.image,
-                                label: 'Format',
-                                value: _bench!.format.name,
-                              ),
-                              StatRow(
-                                icon: Icons.photo_size_select_large,
-                                label: 'Dimensions',
-                                value: '${_bench!.width} x ${_bench!.height}',
-                              ),
-                              StatRow(
-                                icon: Icons.storage,
-                                label: 'Original size',
-                                value: formatBytes(_bench!.originalSize),
-                              ),
-                              StatRow(
-                                icon: Icons.star,
-                                label: 'Recommended quality',
-                                value: 'q${_bench!.recommendedQuality}',
-                              ),
-                            ],
-                          ),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Image Info',
+                              style: theme.textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 8),
+                            StatRow(
+                              icon: Icons.image,
+                              label: 'Format',
+                              value: _bench!.format.name,
+                            ),
+                            StatRow(
+                              icon: Icons.photo_size_select_large,
+                              label: 'Dimensions',
+                              value: '${_bench!.width} x ${_bench!.height}',
+                            ),
+                            StatRow(
+                              icon: Icons.storage,
+                              label: 'Original size',
+                              value: formatBytes(_bench!.originalSize),
+                            ),
+                            StatRow(
+                              icon: Icons.star,
+                              label: 'Recommended quality',
+                              value: 'q${_bench!.recommendedQuality}',
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Quality Sweep',
-                        style: theme.textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      // Bar chart
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            children: [
-                              for (final entry in _bench!.entries)
-                                _BarRow(
-                                  entry: entry,
-                                  maxSize: _bench!.originalSize,
-                                  isRecommended: entry.quality ==
-                                      _bench!.recommendedQuality,
-                                ),
-                            ],
-                          ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text('Quality Sweep', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    // Bar chart
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          children: [
+                            for (final entry in _bench!.entries)
+                              _BarRow(
+                                entry: entry,
+                                maxSize: _bench!.originalSize,
+                                isRecommended:
+                                    entry.quality == _bench!.recommendedQuality,
+                              ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      // Data table
-                      Card(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: DataTable(
-                            columns: const [
-                              DataColumn(label: Text('Quality')),
-                              DataColumn(label: Text('Size')),
-                              DataColumn(label: Text('Reduction')),
-                              DataColumn(label: Text('Time')),
-                            ],
-                            rows: [
-                              for (final entry in _bench!.entries)
-                                DataRow(
-                                  color: entry.quality ==
-                                          _bench!.recommendedQuality
-                                      ? WidgetStateProperty.all(
+                    ),
+                    const SizedBox(height: 16),
+                    // Data table
+                    Card(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: DataTable(
+                          columns: const [
+                            DataColumn(label: Text('Quality')),
+                            DataColumn(label: Text('Size')),
+                            DataColumn(label: Text('Reduction')),
+                            DataColumn(label: Text('Time')),
+                          ],
+                          rows: [
+                            for (final entry in _bench!.entries)
+                              DataRow(
+                                color:
+                                    entry.quality == _bench!.recommendedQuality
+                                        ? WidgetStateProperty.all(
                                           theme.colorScheme.primaryContainer
                                               .withAlpha(80),
                                         )
-                                      : null,
-                                  cells: [
-                                    DataCell(Text('q${entry.quality}')),
-                                    DataCell(Text(entry.sizeFormatted)),
-                                    DataCell(Text(entry.reductionPercent)),
-                                    DataCell(Text('${entry.encodeMs} ms')),
-                                  ],
-                                ),
-                            ],
-                          ),
+                                        : null,
+                                cells: [
+                                  DataCell(Text('q${entry.quality}')),
+                                  DataCell(Text(entry.sizeFormatted)),
+                                  DataCell(Text(entry.reductionPercent)),
+                                  DataCell(Text('${entry.encodeMs} ms')),
+                                ],
+                              ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
+              ),
     );
   }
 }
@@ -196,9 +194,10 @@ class _BarRow extends StatelessWidget {
                   child: Container(
                     height: 18,
                     decoration: BoxDecoration(
-                      color: isRecommended
-                          ? theme.colorScheme.primary
-                          : theme.colorScheme.primaryContainer,
+                      color:
+                          isRecommended
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.primaryContainer,
                       borderRadius: BorderRadius.circular(3),
                     ),
                   ),

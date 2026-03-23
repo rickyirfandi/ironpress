@@ -65,9 +65,9 @@ class _AdvancedOptionsScreenState extends State<AdvancedOptionsScreen> {
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       setState(() => _loading = false);
@@ -95,8 +95,9 @@ class _AdvancedOptionsScreenState extends State<AdvancedOptionsScreen> {
                     const SizedBox(height: 8),
                     SwitchListTile(
                       title: const Text('Progressive'),
-                      subtitle:
-                          const Text('Smaller files, progressive loading'),
+                      subtitle: const Text(
+                        'Smaller files, progressive loading',
+                      ),
                       value: _progressive,
                       onChanged: (v) {
                         setState(() => _progressive = v);

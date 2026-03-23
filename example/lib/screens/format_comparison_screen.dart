@@ -43,9 +43,9 @@ class _FormatComparisonScreenState extends State<FormatComparisonScreen> {
       setState(() {});
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       setState(() => _loading = false);
@@ -71,23 +71,24 @@ class _FormatComparisonScreenState extends State<FormatComparisonScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Format Comparison')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : GridView.count(
-              crossAxisCount: 2,
-              padding: const EdgeInsets.all(12),
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 0.65,
-              children: [
-                for (final fmt in _formats)
-                  if (_results.containsKey(fmt))
-                    _FormatCard(
-                      name: _formatName(fmt),
-                      result: _results[fmt]!,
-                    ),
-              ],
-            ),
+      body:
+          _loading
+              ? const Center(child: CircularProgressIndicator())
+              : GridView.count(
+                crossAxisCount: 2,
+                padding: const EdgeInsets.all(12),
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 0.65,
+                children: [
+                  for (final fmt in _formats)
+                    if (_results.containsKey(fmt))
+                      _FormatCard(
+                        name: _formatName(fmt),
+                        result: _results[fmt]!,
+                      ),
+                ],
+              ),
     );
   }
 }
@@ -107,9 +108,7 @@ class _FormatCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (result.data != null)
-            Expanded(
-              child: Image.memory(result.data!, fit: BoxFit.cover),
-            ),
+            Expanded(child: Image.memory(result.data!, fit: BoxFit.cover)),
           Padding(
             padding: const EdgeInsets.all(10),
             child: Column(
@@ -121,10 +120,7 @@ class _FormatCard extends StatelessWidget {
                   label: 'Size',
                   value: formatBytes(result.compressedSize),
                 ),
-                StatRow(
-                  label: 'Reduction',
-                  value: result.reductionPercent,
-                ),
+                StatRow(label: 'Reduction', value: result.reductionPercent),
               ],
             ),
           ),

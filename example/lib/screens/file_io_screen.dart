@@ -42,9 +42,9 @@ class _FileIoScreenState extends State<FileIoScreen> {
       setState(() => _compressFileResult = result);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       setState(() => _loading = false);
@@ -75,9 +75,9 @@ class _FileIoScreenState extends State<FileIoScreen> {
       setState(() => _fileToFileResult = result);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       setState(() => _loading = false);
@@ -101,10 +101,7 @@ class _FileIoScreenState extends State<FileIoScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'compressFile()',
-                      style: theme.textTheme.titleMedium,
-                    ),
+                    Text('compressFile()', style: theme.textTheme.titleMedium),
                     const SizedBox(height: 4),
                     Text(
                       'Reads from disk, returns compressed bytes in memory.',

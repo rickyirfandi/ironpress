@@ -5,9 +5,10 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  workflow_dispatch:
 
 env:
-  FLUTTER_VERSION: '3.24.0'
+  FLUTTER_VERSION: '3.29.0'
 
 jobs:
   # ─── Dart / Flutter unit + integration tests ─────────────────────────────
@@ -40,7 +41,7 @@ jobs:
         run: flutter analyze
 
       - name: Check formatting
-        run: dart format --line-length=100 --set-exit-if-changed .
+        run: dart format --set-exit-if-changed .
 
       - name: Run unit tests
         run: flutter test test/ironpress_test.dart test/options_test.dart
