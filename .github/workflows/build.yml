@@ -11,7 +11,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  FLUTTER_VERSION: '3.24.0'
+  FLUTTER_VERSION: '3.29.0'
 
 jobs:
   build-android:
@@ -40,9 +40,8 @@ jobs:
 
       - name: Build Android library
         working-directory: rust
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
         run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
           cargo ndk \
             --target ${{ matrix.target }} \
             --platform 21 \
