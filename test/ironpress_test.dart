@@ -91,14 +91,14 @@ void main() {
       );
     });
 
-    test('compressFile accepts boundary values 0 and 100', () {
+    test('compressFile accepts boundary values 0 and 100', () async {
       // Should not throw ArgumentError — just needs to pass validation.
-      // (Will fail later when native lib tries to load, which is fine here.)
-      expect(
+      // May throw CompressException (file not found) which is fine.
+      await expectLater(
         () => Ironpress.compressFile('/photo.jpg', quality: 0),
         isNot(throwsA(isA<ArgumentError>())),
       );
-      expect(
+      await expectLater(
         () => Ironpress.compressFile('/photo.jpg', quality: 100),
         isNot(throwsA(isA<ArgumentError>())),
       );
