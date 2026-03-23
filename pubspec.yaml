@@ -6,15 +6,15 @@ description: >
   Features binary-search file size targeting, batch processing,
   and consistent cross-platform output.
 version: 0.1.0
-homepage: https://github.com/nicearma/ironpress
-repository: https://github.com/nicearma/ironpress
-issue_tracker: https://github.com/nicearma/ironpress/issues
+homepage: https://github.com/rickyirfandi/ironpress
+repository: https://github.com/rickyirfandi/ironpress
+issue_tracker: https://github.com/rickyirfandi/ironpress/issues
 topics:
   - image-compression
-  - rust
-  - ffi
-  - performance
   - image-processing
+  - jpeg
+  - png
+  - webp
 
 environment:
   sdk: ^3.5.0

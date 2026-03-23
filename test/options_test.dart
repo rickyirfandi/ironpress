@@ -368,7 +368,8 @@ void main() {
   group('CompressException', () {
     test('toString includes code and message', () {
       const ex = CompressException(-10, 'decode failed');
-      expect(ex.toString(), 'CompressException(-10): decode failed');
+      expect(ex.toString(), contains('CompressException(-10): decode failed'));
+      expect(ex.toString(), contains('Hint:'));
       expect(ex.code, -10);
       expect(ex.message, 'decode failed');
     });

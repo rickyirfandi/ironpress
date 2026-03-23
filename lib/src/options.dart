@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show immutable;
+
 // ─── Shared utility ──────────────────────────────────────────────────────────
 
 String formatBytes(int bytes) {
@@ -55,6 +57,7 @@ enum ChromaSubsampling {
 ///
 /// These expose mozjpeg's powerful features that most Flutter packages
 /// don't offer. All have sensible defaults.
+@immutable
 class JpegOptions {
   const JpegOptions({
     this.progressive = true,
@@ -76,6 +79,7 @@ class JpegOptions {
 }
 
 /// Advanced PNG optimization options.
+@immutable
 class PngOptions {
   const PngOptions({
     this.optimizationLevel = 2,
@@ -87,6 +91,84 @@ class PngOptions {
   /// - 2: Good balance (default)
   /// - 6: Maximum compression (slowest)
   final int optimizationLevel;
+}
+
+// ─── Quality Presets ─────────────────────────────────────────────────────────
+
+/// Built-in quality presets for common use cases.
+///
+/// Pass to [Ironpress.compressFile], [Ironpress.compressBytes], or
+/// [Ironpress.compressBatch] via the `preset` parameter. Individual
+/// parameters always take priority over the preset value.
+///
+/// ```dart
+/// // One-liner with sensible defaults
+/// final result = await Ironpress.compressFile(
+///   'photo.jpg',
+///   preset: CompressPreset.medium,
+/// );
+///
+/// // Override one field while keeping the rest from the preset
+/// final result = await Ironpress.compressFile(
+///   'photo.jpg',
+///   preset: CompressPreset.medium,
+///   maxWidth: 1280, // override just this
+/// );
+/// ```
+@immutable
+class CompressPreset {
+  const CompressPreset._({
+    required this.quality,
+    required this.minQuality,
+    this.maxWidth,
+    this.maxHeight,
+  });
+
+  /// Social media / messaging. Small file size, fast upload.
+  ///
+  /// - JPEG quality: 65
+  /// - Max dimension: 1280 px (long edge)
+  /// - Min quality floor: 25 (aggressive target-size search)
+  static const low = CompressPreset._(
+    quality: 65,
+    minQuality: 25,
+    maxWidth: 1280,
+    maxHeight: 1280,
+  );
+
+  /// General uploads / in-app photos. Good balance of size and quality.
+  ///
+  /// - JPEG quality: 80
+  /// - Max dimension: 1920 px (long edge)
+  /// - Min quality floor: 35
+  static const medium = CompressPreset._(
+    quality: 80,
+    minQuality: 35,
+    maxWidth: 1920,
+    maxHeight: 1920,
+  );
+
+  /// High-quality archives or professional use. Minimal compression.
+  ///
+  /// - JPEG quality: 92
+  /// - No resize applied
+  /// - Min quality floor: 70
+  static const high = CompressPreset._(
+    quality: 92,
+    minQuality: 70,
+  );
+
+  /// JPEG quality (0–100) for this preset.
+  final int quality;
+
+  /// Minimum quality floor used during binary-search file size targeting.
+  final int minQuality;
+
+  /// Maximum width in pixels, or `null` for no constraint.
+  final int? maxWidth;
+
+  /// Maximum height in pixels, or `null` for no constraint.
+  final int? maxHeight;
 }
 
 // ─── Batch Input ─────────────────────────────────────────────────────────────

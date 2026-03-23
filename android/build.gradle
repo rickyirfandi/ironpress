@@ -4,7 +4,7 @@
 // When building an App Bundle, only the relevant ABI is included
 // in the user's download (~2-3 MB, not all ABIs).
 
-group = 'dev.nicearma.ironpress'
+group = 'dev.rickyirfandi.ironpress'
 version = '1.0'
 
 buildscript {
@@ -28,7 +28,7 @@ rootProject.allprojects {
 apply plugin: 'com.android.library'
 
 android {
-    namespace = "dev.nicearma.ironpress"
+    namespace = "dev.rickyirfandi.ironpress"
     compileSdk = 34
 
     defaultConfig {

@@ -7,9 +7,9 @@ Pod::Spec.new do |s|
     mozjpeg (trellis quantization) and oxipng. Delivers consistent,
     superior compression across all platforms.
   DESC
-  s.homepage         = 'https://github.com/nicearma/ironpress'
+  s.homepage         = 'https://github.com/rickyirfandi/ironpress'
   s.license          = { :type => 'MIT', :file => '../LICENSE' }
-  s.author           = { 'Ricky' => 'dev@nicearma.dev' }
+  s.author           = { 'Ricky Irfandi' => 'dev@rickyirfandi.dev' }
   s.source           = { :path => '.' }
 
   s.ios.deployment_target = '12.0'
