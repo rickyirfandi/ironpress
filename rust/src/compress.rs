@@ -12,9 +12,9 @@ use crate::options::{ChromaSubsampling, CompressParams, OutputFormat};
 /// Decode a JPEG using zune-jpeg (SIMD-accelerated, 2-4x faster than image crate).
 /// Falls back to the image crate if zune-jpeg fails.
 fn decode_jpeg_fast(data: &[u8]) -> Result<DynamicImage, CompressError> {
-    use zune_jpeg::JpegDecoder;
     use zune_jpeg::zune_core::colorspace::ColorSpace;
     use zune_jpeg::zune_core::options::DecoderOptions;
+    use zune_jpeg::JpegDecoder;
 
     let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGB);
     let mut decoder = JpegDecoder::new_with_options(Cursor::new(data), options);
@@ -80,12 +80,11 @@ fn resize_rgb8(
     let rgb = img.to_rgb8();
     let (src_w, src_h) = rgb.dimensions();
 
-    let src = match fir::images::Image::from_vec_u8(
-        src_w, src_h, rgb.into_raw(), fir::PixelType::U8x3,
-    ) {
-        Ok(s) => s,
-        Err(_) => return fallback_resize(img, new_w, new_h),
-    };
+    let src =
+        match fir::images::Image::from_vec_u8(src_w, src_h, rgb.into_raw(), fir::PixelType::U8x3) {
+            Ok(s) => s,
+            Err(_) => return fallback_resize(img, new_w, new_h),
+        };
 
     let mut dst = fir::images::Image::new(new_w, new_h, fir::PixelType::U8x3);
     let mut resizer = fir::Resizer::new();
@@ -113,7 +112,10 @@ fn resize_rgba8(
     let (src_w, src_h) = rgba.dimensions();
 
     let src = match fir::images::Image::from_vec_u8(
-        src_w, src_h, rgba.into_raw(), fir::PixelType::U8x4,
+        src_w,
+        src_h,
+        rgba.into_raw(),
+        fir::PixelType::U8x4,
     ) {
         Ok(s) => s,
         Err(_) => return fallback_resize(img, new_w, new_h),
@@ -157,6 +159,86 @@ pub enum DetectedFormat {
     WebpLossy,
 }
 
+/// Pre-converted pixel buffer to avoid redundant `to_rgb8()`/`to_rgba8()`
+/// calls during binary search iterations. For a 12MP image each conversion
+/// allocates ~36 MB, so converting once instead of 10× eliminates ~360 MB
+/// of allocation churn per compression call.
+enum PreparedPixels {
+    Rgb {
+        data: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+    Rgba {
+        data: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+}
+
+impl PreparedPixels {
+    fn dimensions(&self) -> (u32, u32) {
+        match self {
+            Self::Rgb { width, height, .. } | Self::Rgba { width, height, .. } => (*width, *height),
+        }
+    }
+}
+
+fn prepared_rgb(img: &DynamicImage) -> PreparedPixels {
+    match img {
+        DynamicImage::ImageRgb8(rgb) => {
+            let (width, height) = rgb.dimensions();
+            PreparedPixels::Rgb {
+                data: rgb.as_raw().clone(),
+                width,
+                height,
+            }
+        }
+        other => {
+            let rgb = other.to_rgb8();
+            let (width, height) = rgb.dimensions();
+            PreparedPixels::Rgb {
+                data: rgb.into_raw(),
+                width,
+                height,
+            }
+        }
+    }
+}
+
+fn prepared_rgba(img: &DynamicImage) -> PreparedPixels {
+    match img {
+        DynamicImage::ImageRgba8(rgba) => {
+            let (width, height) = rgba.dimensions();
+            PreparedPixels::Rgba {
+                data: rgba.as_raw().clone(),
+                width,
+                height,
+            }
+        }
+        other => {
+            let rgba = other.to_rgba8();
+            let (width, height) = rgba.dimensions();
+            PreparedPixels::Rgba {
+                data: rgba.into_raw(),
+                width,
+                height,
+            }
+        }
+    }
+}
+
+fn prepare_pixels(img: &DynamicImage, format: DetectedFormat) -> PreparedPixels {
+    match format {
+        DetectedFormat::Jpeg => prepared_rgb(img),
+        DetectedFormat::WebpLossless | DetectedFormat::WebpLossy => match img {
+            DynamicImage::ImageRgb8(_) => prepared_rgb(img),
+            _ => prepared_rgba(img),
+        },
+        DetectedFormat::Png => prepared_rgba(img),
+    }
+}
+
 /// Internal result from the compression engine.
 pub struct EngineResult {
     pub data: Vec<u8>,
@@ -183,10 +265,8 @@ pub fn compress_bytes(
     } else {
         // For PNG, WebP, GIF, BMP, TIFF (detected as Jpeg output format but not
         // actually JPEG input), use the image crate which handles all formats.
-        image::load_from_memory(input)
-            .map_err(|e| CompressError::DecodeError(e.to_string()))?
+        image::load_from_memory(input).map_err(|e| CompressError::DecodeError(e.to_string()))?
     };
-
     let output_format = resolve_output_format(params, original_format);
     let jpeg_exif = resolve_jpeg_exif_payload(input, original_format, output_format, params)?;
 
@@ -226,14 +306,19 @@ fn compress_to_target_size(
     let mut total_iterations: u32 = 0;
     let mut resized = false;
 
+    // Pre-convert pixel data once — avoids redundant to_rgb8()/to_rgba8()
+    // on every binary search iteration (up to 10× per resize cycle).
+    let mut prepared = prepare_pixels(&img, output_format);
+
     for _resize_cycle in 0..MAX_RESIZE_CYCLES {
         // First, try at the requested quality — often it's already small enough
         let initial_q = params.quality.min(100) as u8;
-        let initial_encoded = encode_image(&img, initial_q, output_format, params, jpeg_exif)?;
+        let initial_encoded =
+            encode_image_prepared(&prepared, &img, initial_q, output_format, params, jpeg_exif)?;
         total_iterations += 1;
 
         if initial_encoded.len() <= target {
-            let (w, h) = img.dimensions();
+            let (w, h) = prepared.dimensions();
             return Ok(EngineResult {
                 data: initial_encoded,
                 width: w,
@@ -246,12 +331,19 @@ fn compress_to_target_size(
 
         // Binary search: find highest quality that fits under target
         let search_result = binary_search_quality(
-            &img, min_q, initial_q.saturating_sub(1), target, output_format, params, jpeg_exif,
+            &prepared,
+            &img,
+            min_q,
+            initial_q.saturating_sub(1),
+            target,
+            output_format,
+            params,
+            jpeg_exif,
         )?;
         total_iterations += search_result.iterations;
 
         if let Some((best_data, best_q)) = search_result.best {
-            let (w, h) = img.dimensions();
+            let (w, h) = prepared.dimensions();
             return Ok(EngineResult {
                 data: best_data,
                 width: w,
@@ -265,9 +357,10 @@ fn compress_to_target_size(
         // Even min_quality didn't fit — try resize if allowed
         if !allow_resize {
             // Encode at min quality as best effort
-            let fallback = encode_image(&img, min_q, output_format, params, jpeg_exif)?;
+            let fallback =
+                encode_image_prepared(&prepared, &img, min_q, output_format, params, jpeg_exif)?;
             total_iterations += 1;
-            let (w, h) = img.dimensions();
+            let (w, h) = prepared.dimensions();
             return Ok(EngineResult {
                 data: fallback,
                 width: w,
@@ -290,12 +383,14 @@ fn compress_to_target_size(
 
         img = Cow::Owned(resize_fast(&img, new_w, new_h));
         resized = true;
+        // Re-prepare pixels from resized image
+        prepared = prepare_pixels(&img, output_format);
     }
 
     // Final fallback: return whatever we can at min quality at current size
-    let fallback = encode_image(&img, min_q, output_format, params, jpeg_exif)?;
+    let fallback = encode_image_prepared(&prepared, &img, min_q, output_format, params, jpeg_exif)?;
     total_iterations += 1;
-    let (w, h) = img.dimensions();
+    let (w, h) = prepared.dimensions();
     Ok(EngineResult {
         data: fallback,
         width: w,
@@ -311,7 +406,9 @@ struct SearchResult {
     iterations: u32,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn binary_search_quality(
+    prepared: &PreparedPixels,
     img: &DynamicImage,
     lo_init: u8,
     hi_init: u8,
@@ -327,7 +424,7 @@ fn binary_search_quality(
 
     while lo <= hi && iterations < MAX_BINARY_SEARCH_ITERATIONS {
         let mid = lo + (hi - lo) / 2;
-        let encoded = encode_image(img, mid, output_format, params, jpeg_exif)?;
+        let encoded = encode_image_prepared(prepared, img, mid, output_format, params, jpeg_exif)?;
         iterations += 1;
 
         if encoded.len() <= target {
@@ -351,6 +448,8 @@ fn binary_search_quality(
 
 // ─── Encoding ────────────────────────────────────────────────────────────────
 
+/// Encode using a DynamicImage — used for single-shot paths where pixel
+/// conversion overhead is negligible (called once, not in a loop).
 fn encode_image(
     img: &DynamicImage,
     quality: u8,
@@ -363,6 +462,59 @@ fn encode_image(
         DetectedFormat::Png => encode_png(img, params),
         DetectedFormat::WebpLossless => encode_webp_lossless(img, params),
         DetectedFormat::WebpLossy => encode_webp_lossy(img, quality),
+    }
+}
+
+/// Encode using pre-converted pixel data — used in binary search loops
+/// to avoid redundant to_rgb8()/to_rgba8() conversions per iteration.
+/// Falls back to DynamicImage for PNG (which doesn't participate in
+/// quality-based binary search in practice).
+fn encode_image_prepared(
+    prepared: &PreparedPixels,
+    img: &DynamicImage,
+    quality: u8,
+    format: DetectedFormat,
+    params: &CompressParams,
+    jpeg_exif: Option<&[u8]>,
+) -> Result<Vec<u8>, CompressError> {
+    match format {
+        DetectedFormat::Jpeg => {
+            if let PreparedPixels::Rgb {
+                data,
+                width,
+                height,
+            } = prepared
+            {
+                encode_jpeg_raw(data, *width, *height, quality, params, jpeg_exif)
+            } else {
+                encode_jpeg(img, quality, params, jpeg_exif)
+            }
+        }
+        DetectedFormat::Png => encode_png(img, params),
+        DetectedFormat::WebpLossless => match prepared {
+            PreparedPixels::Rgb {
+                data,
+                width,
+                height,
+            } => encode_webp_lossless_rgb_raw(data, *width, *height),
+            PreparedPixels::Rgba {
+                data,
+                width,
+                height,
+            } => encode_webp_lossless_rgba_raw(data, *width, *height),
+        },
+        DetectedFormat::WebpLossy => match prepared {
+            PreparedPixels::Rgb {
+                data,
+                width,
+                height,
+            } => encode_webp_lossy_rgb_raw(data, *width, *height, quality),
+            PreparedPixels::Rgba {
+                data,
+                width,
+                height,
+            } => encode_webp_lossy_rgba_raw(data, *width, *height, quality),
+        },
     }
 }
 
@@ -387,6 +539,18 @@ fn encode_jpeg(
         }
     };
 
+    encode_jpeg_raw(pixels, width, height, quality, params, jpeg_exif)
+}
+
+/// JPEG encoding from pre-converted RGB8 pixel data.
+fn encode_jpeg_raw(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    params: &CompressParams,
+    jpeg_exif: Option<&[u8]>,
+) -> Result<Vec<u8>, CompressError> {
     let use_trellis = params.jpeg_trellis != 0;
     let progressive = params.jpeg_progressive != 0;
 
@@ -426,15 +590,11 @@ fn encode_jpeg(
     Ok(data)
 }
 
-fn encode_png(
-    img: &DynamicImage,
-    params: &CompressParams,
-) -> Result<Vec<u8>, CompressError> {
-    // First encode to standard PNG in memory.
-    // Pre-allocate with rough estimate to reduce reallocations.
+fn encode_png(img: &DynamicImage, params: &CompressParams) -> Result<Vec<u8>, CompressError> {
+    // Pre-allocate based on image size to reduce reallocation during encoding.
     let (w, h) = img.dimensions();
-    let estimated = (w as usize * h as usize).min(16 * 1024 * 1024); // cap estimate at 16 MB
-    let mut buf = Vec::with_capacity(estimated);
+    let estimated = (w as usize * h as usize * 4) / 2;
+    let mut buf = Vec::with_capacity(estimated.min(64 * 1024 * 1024));
     let mut cursor = Cursor::new(&mut buf);
     img.write_to(&mut cursor, ImageFormat::Png)
         .map_err(|e| CompressError::EncodeError(format!("PNG encode failed: {e}")))?;
@@ -540,44 +700,78 @@ fn encode_webp_lossless(
     img: &DynamicImage,
     _params: &CompressParams,
 ) -> Result<Vec<u8>, CompressError> {
-    let mut buf = Vec::new();
-    let encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut buf);
-
-    // Use native color type to avoid unnecessary conversion
     match img {
         DynamicImage::ImageRgb8(rgb) => {
             let (w, h) = rgb.dimensions();
-            encoder.encode(rgb.as_raw(), w, h, image::ExtendedColorType::Rgb8)
+            encode_webp_lossless_rgb_raw(rgb.as_raw(), w, h)
         }
         other => {
             let rgba = other.to_rgba8();
             let (w, h) = rgba.dimensions();
-            encoder.encode(rgba.as_raw(), w, h, image::ExtendedColorType::Rgba8)
+            encode_webp_lossless_rgba_raw(rgba.as_raw(), w, h)
         }
     }
-    .map_err(|e| CompressError::EncodeError(format!("WebP encode failed: {e}")))?;
+}
 
+fn encode_webp_lossless_rgb_raw(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, CompressError> {
+    let mut buf = Vec::new();
+    let encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut buf);
+    encoder
+        .encode(pixels, width, height, image::ExtendedColorType::Rgb8)
+        .map_err(|e| CompressError::EncodeError(format!("WebP encode failed: {e}")))?;
+    Ok(buf)
+}
+
+fn encode_webp_lossless_rgba_raw(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, CompressError> {
+    let mut buf = Vec::new();
+    let encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut buf);
+    encoder
+        .encode(pixels, width, height, image::ExtendedColorType::Rgba8)
+        .map_err(|e| CompressError::EncodeError(format!("WebP encode failed: {e}")))?;
     Ok(buf)
 }
 
 /// Encode image as lossy WebP using the `webp` crate.
 /// Uses RGB path when possible to avoid unnecessary RGBA conversion.
-fn encode_webp_lossy(
-    img: &DynamicImage,
-    quality: u8,
-) -> Result<Vec<u8>, CompressError> {
-    let mem = match img {
+fn encode_webp_lossy(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, CompressError> {
+    match img {
         DynamicImage::ImageRgb8(rgb) => {
-            let encoder = webp::Encoder::from_rgb(rgb.as_raw(), rgb.width(), rgb.height());
-            encoder.encode(quality as f32)
+            encode_webp_lossy_rgb_raw(rgb.as_raw(), rgb.width(), rgb.height(), quality)
         }
         other => {
             let rgba = other.to_rgba8();
-            let encoder = webp::Encoder::from_rgba(rgba.as_raw(), rgba.width(), rgba.height());
-            encoder.encode(quality as f32)
+            encode_webp_lossy_rgba_raw(rgba.as_raw(), rgba.width(), rgba.height(), quality)
         }
-    };
+    }
+}
 
+fn encode_webp_lossy_rgb_raw(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+) -> Result<Vec<u8>, CompressError> {
+    let encoder = webp::Encoder::from_rgb(pixels, width, height);
+    let mem = encoder.encode(quality as f32);
+    Ok(mem.to_vec())
+}
+
+fn encode_webp_lossy_rgba_raw(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+) -> Result<Vec<u8>, CompressError> {
+    let encoder = webp::Encoder::from_rgba(pixels, width, height);
+    let mem = encoder.encode(quality as f32);
     Ok(mem.to_vec())
 }
 
@@ -749,8 +943,7 @@ pub fn benchmark_bytes(
     let img = if format == DetectedFormat::Jpeg && is_native_jpeg(data) {
         decode_jpeg_fast(data)?
     } else {
-        image::load_from_memory(data)
-            .map_err(|e| CompressError::DecodeError(e.to_string()))?
+        image::load_from_memory(data).map_err(|e| CompressError::DecodeError(e.to_string()))?
     };
 
     // Apply resize constraints so benchmark matches real output
@@ -768,11 +961,13 @@ pub fn benchmark_bytes(
         _ => vec![0],
     };
 
+    // Pre-convert pixels once for the entire sweep (avoids 11× redundant conversions).
+    let prepared = prepare_pixels(&img, output_format);
     let mut entries = Vec::with_capacity(quality_levels.len());
 
     for &q in &quality_levels {
         let start = std::time::Instant::now();
-        let encoded = encode_image(&img, q as u8, output_format, params, None)?;
+        let encoded = encode_image_prepared(&prepared, &img, q as u8, output_format, params, None)?;
         let elapsed = start.elapsed().as_millis() as u32;
 
         entries.push(BenchmarkEntry {
