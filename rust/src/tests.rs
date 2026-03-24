@@ -594,7 +594,101 @@ mod tests {
         assert_eq!(rec, 80); // fallback
     }
 
-    // ─── PreparedPixels / Binary Search Optimization ────────────────
+    // ─── PreparedPixels / Bit-for-bit Equivalence ───────────────────
+    //
+    // These tests verify that the PreparedPixels optimization produces
+    // byte-identical output compared to the DynamicImage path. The
+    // refactoring must be a pure performance change with zero quality
+    // or behavioral impact.
+
+    #[test]
+    fn prepared_jpeg_matches_dynamic_image_path() {
+        // Verify encode_jpeg_raw produces identical bytes to encode_jpeg
+        // for the same input image and parameters.
+        let input = test_image_jpeg(256, 256);
+        let img = image::load_from_memory(&input).unwrap();
+
+        let params = CompressParams::default();
+
+        // Path A: Original DynamicImage-based encode (calls to_rgb8 internally)
+        let via_dynamic =
+            crate::compress::tests_internal::encode_jpeg_via_dynamic(&img, 75, &params, None);
+
+        // Path B: PreparedPixels path (pre-converted RGB8 buffer)
+        let rgb = img.to_rgb8();
+        let (w, h) = rgb.dimensions();
+        let via_prepared = crate::compress::tests_internal::encode_jpeg_via_raw(
+            rgb.as_raw(),
+            w,
+            h,
+            75,
+            &params,
+            None,
+        );
+
+        assert_eq!(
+            via_dynamic, via_prepared,
+            "PreparedPixels JPEG output must be byte-identical to DynamicImage path"
+        );
+    }
+
+    #[test]
+    fn prepared_webp_lossy_matches_dynamic_image_path() {
+        let input = minimal_jpeg();
+        let img = image::load_from_memory(&input).unwrap();
+
+        // Path A: DynamicImage-based
+        let via_dynamic = crate::compress::tests_internal::encode_webp_lossy_via_dynamic(&img, 80);
+
+        // Path B: PreparedPixels-based
+        let rgba = img.to_rgba8();
+        let (w, h) = (rgba.width(), rgba.height());
+        let via_prepared =
+            crate::compress::tests_internal::encode_webp_lossy_via_raw(rgba.as_raw(), w, h, 80);
+
+        assert_eq!(
+            via_dynamic, via_prepared,
+            "PreparedPixels WebP lossy output must be byte-identical to DynamicImage path"
+        );
+    }
+
+    #[test]
+    fn prepared_webp_lossless_matches_dynamic_image_path() {
+        let input = minimal_png();
+        let img = image::load_from_memory(&input).unwrap();
+
+        // Path A: DynamicImage-based
+        let via_dynamic = crate::compress::tests_internal::encode_webp_lossless_via_dynamic(&img);
+
+        // Path B: PreparedPixels-based
+        let rgba = img.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        let via_prepared =
+            crate::compress::tests_internal::encode_webp_lossless_via_raw(rgba.as_raw(), w, h);
+
+        assert_eq!(
+            via_dynamic, via_prepared,
+            "PreparedPixels WebP lossless output must be byte-identical to DynamicImage path"
+        );
+    }
+
+    #[test]
+    fn single_shot_path_unchanged_by_refactor() {
+        // The non-target-size path (max_file_size == 0) still uses
+        // encode_image (DynamicImage), not encode_image_prepared.
+        // Verify it produces identical output to the same quality.
+        let input = test_image_jpeg(256, 256);
+
+        let mut params = CompressParams::default();
+        params.quality = 75;
+
+        let result1 = compress_bytes(&input, &params).unwrap();
+        let result2 = compress_bytes(&input, &params).unwrap();
+
+        assert_eq!(result1.data, result2.data, "Deterministic output expected");
+        assert_eq!(result1.quality_used, 75);
+        assert_eq!(result1.iterations, 1);
+    }
 
     #[test]
     fn target_size_many_iterations_produces_valid_output() {

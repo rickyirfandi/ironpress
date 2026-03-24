@@ -809,6 +809,57 @@ fn resolve_jpeg_exif_payload(
     }
 }
 
+/// Test-only wrappers that expose internal encoding functions so tests can
+/// verify that the PreparedPixels path produces byte-identical output to
+/// the original DynamicImage path.
+#[cfg(test)]
+pub(crate) mod tests_internal {
+    use super::*;
+    use crate::options::CompressParams;
+
+    pub fn encode_jpeg_via_dynamic(
+        img: &DynamicImage,
+        quality: u8,
+        params: &CompressParams,
+        exif: Option<&[u8]>,
+    ) -> Vec<u8> {
+        encode_jpeg(img, quality, params, exif).unwrap()
+    }
+
+    pub fn encode_jpeg_via_raw(
+        pixels: &[u8],
+        width: u32,
+        height: u32,
+        quality: u8,
+        params: &CompressParams,
+        exif: Option<&[u8]>,
+    ) -> Vec<u8> {
+        encode_jpeg_raw(pixels, width, height, quality, params, exif).unwrap()
+    }
+
+    pub fn encode_webp_lossy_via_dynamic(img: &DynamicImage, quality: u8) -> Vec<u8> {
+        encode_webp_lossy(img, quality).unwrap()
+    }
+
+    pub fn encode_webp_lossy_via_raw(
+        pixels: &[u8],
+        width: u32,
+        height: u32,
+        quality: u8,
+    ) -> Vec<u8> {
+        encode_webp_lossy_raw(pixels, width, height, quality).unwrap()
+    }
+
+    pub fn encode_webp_lossless_via_dynamic(img: &DynamicImage) -> Vec<u8> {
+        let params = CompressParams::default();
+        encode_webp_lossless(img, &params).unwrap()
+    }
+
+    pub fn encode_webp_lossless_via_raw(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
+        encode_webp_lossless_raw(pixels, width, height).unwrap()
+    }
+}
+
 fn extract_jpeg_exif_payload(data: &[u8]) -> Option<Vec<u8>> {
     if data.len() < 4 || data[0] != 0xFF || data[1] != 0xD8 {
         return None;
