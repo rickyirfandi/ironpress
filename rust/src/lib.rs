@@ -8,8 +8,30 @@ mod tests;
 use std::ffi::CStr;
 use std::slice;
 use std::sync::atomic::AtomicU32;
+use std::sync::OnceLock;
 
 use options::{CompressParams, CompressResult};
+
+/// Global rayon thread pool — initialized once on first batch call, reused
+/// for all subsequent calls. Eliminates OS-level thread creation overhead
+/// (~10-20ms per batch) on repeated batch operations.
+static BATCH_POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+
+fn get_or_init_pool(num_threads: usize) -> &'static rayon::ThreadPool {
+    BATCH_POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("img-compress-{i}"))
+            .stack_size(4 * 1024 * 1024)
+            .build()
+            .unwrap_or_else(|_| {
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(1)
+                    .build()
+                    .unwrap()
+            })
+    })
+}
 
 /// ABI version — increment when any #[repr(C)] struct layout changes.
 /// Dart checks this on first load and throws on mismatch.
@@ -70,7 +92,11 @@ pub unsafe extern "C" fn compress_file(
     if input_data.len() > MAX_INPUT_SIZE {
         *out = CompressResult::error(
             -5,
-            &format!("Input file too large ({} bytes, max {})", input_data.len(), MAX_INPUT_SIZE),
+            &format!(
+                "Input file too large ({} bytes, max {})",
+                input_data.len(),
+                MAX_INPUT_SIZE
+            ),
         );
         return;
     }
@@ -198,7 +224,11 @@ pub unsafe extern "C" fn compress_file_to_file(
     if input_data.len() > MAX_INPUT_SIZE {
         *out = CompressResult::error(
             -5,
-            &format!("Input file too large ({} bytes, max {})", input_data.len(), MAX_INPUT_SIZE),
+            &format!(
+                "Input file too large ({} bytes, max {})",
+                input_data.len(),
+                MAX_INPUT_SIZE
+            ),
         );
         return;
     }
@@ -315,18 +345,8 @@ pub unsafe extern "C" fn compress_batch(
 
     let start = Instant::now();
 
-    // Build thread pool
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .thread_name(|i| format!("img-compress-{i}"))
-        .stack_size(4 * 1024 * 1024)
-        .build()
-        .unwrap_or_else(|_| {
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(1)
-                .build()
-                .unwrap()
-        });
+    // Reuse static thread pool (initialized once, lives for process lifetime).
+    let pool = get_or_init_pool(num_threads);
 
     // ── Process in chunks to bound memory ──
     let mut all_results: Vec<CompressResult> = Vec::with_capacity(count);
@@ -336,11 +356,9 @@ pub unsafe extern "C" fn compress_batch(
             let chunk_results: Vec<CompressResult> = chunk_inputs
                 .par_iter()
                 .map(|input| {
-                    let result = std::panic::catch_unwind(
-                        std::panic::AssertUnwindSafe(|| {
-                            process_batch_input(input, params)
-                        })
-                    );
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        process_batch_input(input, params)
+                    }));
 
                     progress_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
@@ -499,7 +517,10 @@ pub unsafe extern "C" fn free_batch_result(result: *mut options::BatchResult) {
             }
         }
 
-        let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(batch.results, batch.count));
+        let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            batch.results,
+            batch.count,
+        ));
         batch.results = std::ptr::null_mut();
     }
 
@@ -585,7 +606,13 @@ fn probe_bytes_impl(data: &[u8]) -> options::ProbeResult {
                 compress::DetectedFormat::WebpLossless => 3u32,
                 compress::DetectedFormat::WebpLossy => 4u32,
             };
-            options::ProbeResult::success(info.width, info.height, fmt, info.file_size, info.has_exif)
+            options::ProbeResult::success(
+                info.width,
+                info.height,
+                fmt,
+                info.file_size,
+                info.has_exif,
+            )
         }
         Err(e) => options::ProbeResult::error(-10, &e.to_string()),
     }
@@ -597,7 +624,9 @@ fn probe_bytes_impl(data: &[u8]) -> options::ProbeResult {
 /// `result` must be a valid pointer to a ProbeResult, or null.
 #[no_mangle]
 pub unsafe extern "C" fn free_probe_result(result: *mut options::ProbeResult) {
-    if result.is_null() { return; }
+    if result.is_null() {
+        return;
+    }
     let r = &mut *result;
     if !r.error_message.is_null() {
         let _ = std::ffi::CString::from_raw(r.error_message);
@@ -685,14 +714,16 @@ fn benchmark_bytes_impl(data: &[u8], params: &options::CompressParams) -> option
                 compress::DetectedFormat::WebpLossy => 4u32,
             };
 
-            let mut ffi_entries: Vec<options::BenchmarkEntry> = info.entries.into_iter().map(|e| {
-                options::BenchmarkEntry {
+            let mut ffi_entries: Vec<options::BenchmarkEntry> = info
+                .entries
+                .into_iter()
+                .map(|e| options::BenchmarkEntry {
                     quality: e.quality,
                     size_bytes: e.size_bytes,
                     ratio: e.ratio,
                     encode_ms: e.encode_ms,
-                }
-            }).collect();
+                })
+                .collect();
 
             let entries_ptr = ffi_entries.as_mut_ptr();
             let entry_count = ffi_entries.len();
@@ -735,7 +766,9 @@ fn benchmark_error(code: i32, message: &str) -> options::BenchmarkResult {
 /// `result` must be a valid pointer to a BenchmarkResult, or null.
 #[no_mangle]
 pub unsafe extern "C" fn free_benchmark_result(result: *mut options::BenchmarkResult) {
-    if result.is_null() { return; }
+    if result.is_null() {
+        return;
+    }
     let r = &mut *result;
     if !r.entries.is_null() && r.entry_count > 0 {
         let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(r.entries, r.entry_count));

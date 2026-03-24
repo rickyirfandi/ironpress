@@ -53,7 +53,7 @@ mod tests {
         // Inject a fake APP1/Exif segment right after SOI (FF D8)
         let mut out = Vec::new();
         out.extend_from_slice(&base[..2]); // SOI: FF D8
-        // APP1 marker: FF E1
+                                           // APP1 marker: FF E1
         out.push(0xFF);
         out.push(0xE1);
         // Segment length (includes length field itself): 2 + 6 (Exif\0\0) + 2 (dummy) = 10
@@ -220,7 +220,11 @@ mod tests {
 
         let result = compress_bytes(&input, &params).unwrap();
 
-        assert!(result.width <= 200, "Width {} exceeds max 200", result.width);
+        assert!(
+            result.width <= 200,
+            "Width {} exceeds max 200",
+            result.width
+        );
         assert_eq!(result.height, 150);
     }
 
@@ -272,7 +276,10 @@ mod tests {
             result.data.len(),
             target
         );
-        assert!(result.iterations > 1, "Should have needed multiple iterations");
+        assert!(
+            result.iterations > 1,
+            "Should have needed multiple iterations"
+        );
     }
 
     #[test]
@@ -452,7 +459,10 @@ mod tests {
 
         let result = compress_bytes(&data, &params).unwrap();
         let probe = probe_bytes(&result.data).unwrap();
-        assert!(probe.has_exif, "EXIF should survive JPEG roundtrip with keep_metadata");
+        assert!(
+            probe.has_exif,
+            "EXIF should survive JPEG roundtrip with keep_metadata"
+        );
     }
 
     // ─── PNG Optimization Levels ─────────────────────────────────────
@@ -532,7 +542,11 @@ mod tests {
         assert_eq!(result.format, DetectedFormat::Jpeg);
         assert_eq!(result.original_size, input.len());
 
-        assert!(result.entries.len() >= 5, "Got {} entries", result.entries.len());
+        assert!(
+            result.entries.len() >= 5,
+            "Got {} entries",
+            result.entries.len()
+        );
         assert!(result.entries[0].quality > result.entries.last().unwrap().quality);
         assert!(result.entries[0].size_bytes >= result.entries.last().unwrap().size_bytes);
         assert!(result.recommended_quality >= 20 && result.recommended_quality <= 95);
@@ -578,6 +592,45 @@ mod tests {
         let entries: Vec<crate::compress::BenchmarkEntry> = vec![];
         let rec = find_recommended_quality(&entries, 100000);
         assert_eq!(rec, 80); // fallback
+    }
+
+    // ─── PreparedPixels / Binary Search Optimization ────────────────
+
+    #[test]
+    fn target_size_many_iterations_produces_valid_output() {
+        // Force a very small target on a larger image to exercise many
+        // binary search iterations + potential resize cycles.
+        let input = test_image_jpeg(512, 512);
+        let mut params = CompressParams::default();
+        params.max_file_size = 2048; // very tight target
+        params.min_quality = 5;
+        params.allow_resize = 1;
+
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert!(!result.data.is_empty(), "Should produce output");
+        assert!(
+            result.iterations > 2,
+            "Should need multiple iterations, got {}",
+            result.iterations
+        );
+        // Verify output is valid JPEG
+        assert_eq!(&result.data[0..3], &[0xFF, 0xD8, 0xFF]);
+    }
+
+    #[test]
+    fn target_size_webp_lossy_uses_prepared_pixels() {
+        let input = minimal_jpeg();
+        let mut params = CompressParams::default();
+        params.format = 4; // WebP lossy
+        params.max_file_size = 500; // tight target
+        params.min_quality = 10;
+        params.allow_resize = 1;
+
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert!(!result.data.is_empty());
+        assert_eq!(&result.data[0..4], b"RIFF");
     }
 
     // ─── ABI Version ────────────────────────────────────────────────
