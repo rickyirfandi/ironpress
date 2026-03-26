@@ -79,7 +79,7 @@ final _features = <_Feature>[
   ),
   _Feature(
     title: 'Benchmark',
-    subtitle: 'Quality sweep with bar chart',
+    subtitle: 'Compare ironpress with popular packages',
     icon: Icons.speed,
     builder: (_) => const BenchmarkScreen(),
   ),

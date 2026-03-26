@@ -18,13 +18,13 @@ Future<Uint8List> loadTestImage() async {
   return _generateTestImage();
 }
 
-/// Generates a ~200-400KB test image programmatically using dart:ui.
+/// Generates a test image programmatically using dart:ui.
 ///
-/// Creates a 800x600 image with gradients and shapes so compression
-/// demos produce meaningful results.
+/// Creates a 2048x1536 image (3.1 MP, typical phone photo) with gradients
+/// and shapes so compression demos produce meaningful results.
 Future<Uint8List> _generateTestImage() async {
-  const width = 800;
-  const height = 600;
+  const width = 2048;
+  const height = 1536;
 
   final recorder = ui.PictureRecorder();
   final canvas = ui.Canvas(recorder);
@@ -34,7 +34,7 @@ Future<Uint8List> _generateTestImage() async {
       ui.Paint()
         ..shader = ui.Gradient.linear(
           ui.Offset.zero,
-          const ui.Offset(800, 600),
+          const ui.Offset(2048, 1536),
           [
             const ui.Color(0xFF1A237E),
             const ui.Color(0xFF0D47A1),
@@ -43,7 +43,7 @@ Future<Uint8List> _generateTestImage() async {
           ],
           [0.0, 0.33, 0.66, 1.0],
         );
-  canvas.drawRect(const ui.Rect.fromLTWH(0, 0, 800, 600), bgPaint);
+  canvas.drawRect(const ui.Rect.fromLTWH(0, 0, 2048, 1536), bgPaint);
 
   // Add overlapping circles with radial gradients for texture
   final colors = [
@@ -55,14 +55,14 @@ Future<Uint8List> _generateTestImage() async {
     const ui.Color(0x809C27B0),
   ];
   final positions = [
-    const ui.Offset(200, 150),
-    const ui.Offset(600, 200),
-    const ui.Offset(400, 400),
-    const ui.Offset(150, 450),
-    const ui.Offset(650, 450),
-    const ui.Offset(400, 200),
+    const ui.Offset(512, 384),
+    const ui.Offset(1536, 512),
+    const ui.Offset(1024, 1024),
+    const ui.Offset(384, 1152),
+    const ui.Offset(1664, 1152),
+    const ui.Offset(1024, 512),
   ];
-  final radii = [120.0, 100.0, 140.0, 90.0, 110.0, 130.0];
+  final radii = [307.0, 256.0, 358.0, 230.0, 282.0, 333.0];
 
   for (var i = 0; i < colors.length; i++) {
     final paint =
@@ -96,10 +96,10 @@ Future<Uint8List> _generateTestImage() async {
 
   // Add text-like shapes (small rectangles) for detail
   final detailPaint = ui.Paint()..color = const ui.Color(0x40FFFFFF);
-  for (var y = 250; y < 350; y += 12) {
-    final w = 100.0 + (y % 60);
+  for (var y = 640; y < 896; y += 16) {
+    final w = 256.0 + (y % 154);
     canvas.drawRect(
-      ui.Rect.fromLTWH(350 - w / 2, y.toDouble(), w, 6),
+      ui.Rect.fromLTWH(1024 - w / 2, y.toDouble(), w, 8),
       detailPaint,
     );
   }
