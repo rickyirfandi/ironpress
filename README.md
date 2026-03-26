@@ -14,7 +14,7 @@
   <a href="https://pub.dev/packages/ironpress/score"><img src="https://img.shields.io/pub/points/ironpress" alt="pub points"></a>
   <a href="https://github.com/rickyirfandi/ironpress/actions/workflows/test.yml"><img src="https://github.com/rickyirfandi/ironpress/actions/workflows/test.yml/badge.svg" alt="tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license"></a>
-  <img src="https://img.shields.io/badge/platforms-android%20%7C%20iOS%20%7C%20windows-blue" alt="platforms">
+  <img src="https://img.shields.io/badge/platforms-android%20%7C%20iOS%20%7C%20windows%20%7C%20macOS%20%7C%20linux-blue" alt="platforms">
 </p>
 
 ---
@@ -40,13 +40,13 @@ ironpress compresses JPEG, PNG, and WebP images using mozjpeg, oxipng, and libwe
 
 | Platform | Architectures | Status |
 |---|---|---|
-| Android | arm64, armv7, x86_64 | Prebuilt |
+| Android | arm64, armv7, x86_64, x86 | Prebuilt |
 | iOS | arm64 (device + simulator) | Prebuilt |
 | Windows | x86_64 | Prebuilt |
-| macOS | arm64, x86_64 | Build from source |
-| Linux | x86_64 | Build from source |
+| macOS | arm64, x86_64 (universal) | Prebuilt |
+| Linux | x86_64 | Prebuilt |
 
-Web is not supported (dart:ffi is unavailable on Flutter Web).
+All platforms ship with precompiled native libraries. No Rust toolchain required. Web is not supported (dart:ffi is unavailable on Flutter Web).
 
 ## Getting Started
 
@@ -210,7 +210,7 @@ final bytes = result.data; // Same Uint8List
 
 ## Building from Source
 
-This release ships prebuilt Android, iOS, and Windows binaries. macOS and Linux require building from source.
+All platforms ship with prebuilt binaries. You only need the Rust toolchain if you want to recompile the native libraries yourself.
 
 ```bash
 # Prerequisites
