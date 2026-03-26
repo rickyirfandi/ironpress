@@ -17,3 +17,6 @@ ios/Flutter/
 # macOS build artifacts (but keep libs/ and podspec)
 macos/Flutter/
 macos/Pods/
+
+# Assets (logo etc.) - referenced via raw GitHub URL
+asset/
