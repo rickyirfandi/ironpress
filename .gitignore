@@ -27,6 +27,21 @@ macos/Pods/
 # macos/libs/
 # windows/libs/
 
+# Example app — Flutter-generated platform runners (regenerate with `flutter create`)
+example/android/
+example/ios/
+example/linux/
+example/macos/
+example/windows/
+example/web/
+example/.metadata
+example/.flutter-plugins-dependencies
+example/test/
+example/README.md
+
+# Claude Code local settings
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db

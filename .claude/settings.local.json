@@ -15,7 +15,9 @@
       "WebSearch",
       "WebFetch(domain:pub.dev)",
       "Bash(dart format:*)",
-      "Bash(flutter pub:*)"
+      "Bash(flutter pub:*)",
+      "Bash(cd:*)",
+      "Bash(find /c/PROJECT/ironpress/rust -name *.rs -type f)"
     ]
   }
 }

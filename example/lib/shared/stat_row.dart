@@ -18,17 +18,28 @@ class StatRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (icon != null) ...[
             Icon(icon, size: 16, color: theme.colorScheme.primary),
             const SizedBox(width: 8),
           ],
-          Text(label, style: theme.textTheme.bodyMedium),
-          const Spacer(),
-          Text(
-            value,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
+          Flexible(
+            flex: 3,
+            child: Text(
+              label,
+              style: theme.textTheme.bodyMedium,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Flexible(
+            flex: 4,
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],

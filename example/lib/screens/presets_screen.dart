@@ -40,6 +40,7 @@ class _PresetsScreenState extends State<PresetsScreen> {
         final result = await Ironpress.compressBytes(
           bytes,
           preset: entry.value,
+          format: CompressFormat.jpeg,
         );
         _results[entry.key] = result;
       }

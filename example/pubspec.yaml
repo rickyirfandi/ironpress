@@ -8,6 +8,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_image_compress: ^2.4.0
+  image: ^4.8.0
   ironpress:
     path: ../
 

@@ -39,6 +39,7 @@ class _BasicCompressionScreenState extends State<BasicCompressionScreen> {
       final result = await Ironpress.compressBytes(
         _original!,
         quality: _quality.round(),
+        format: CompressFormat.jpeg,
       );
       setState(() => _result = result);
     } catch (e) {
