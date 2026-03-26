@@ -11,15 +11,17 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp", "tiff"] }
+zune-jpeg = "0.5"
 mozjpeg-rs = "0.5"
 oxipng = { version = "9", default-features = false, features = ["parallel"] }
 webp = "0.3"
 rayon = "1.10"
 libc = "0.2"
+fast_image_resize = "5"
 
 [profile.release]
 opt-level = 3            # Optimize for throughput
-lto = "thin"             # Better runtime without the cost of full-fat LTO
+lto = "fat"              # Full LTO for best cross-crate inlining (mozjpeg+image+oxipng)
 codegen-units = 1        # Better code generation at the cost of compile time
 panic = "unwind"         # Required for catch_unwind (batch crash safety)
 strip = true             # Strip symbols from binary

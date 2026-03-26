@@ -1,11 +1,82 @@
 use std::borrow::Cow;
 use std::io::Cursor;
 
-use image::{DynamicImage, GenericImageView, ImageFormat, ImageReader};
+use image::{DynamicImage, GenericImageView, ImageFormat, ImageReader, RgbImage};
 use mozjpeg_rs::{Preset, Subsampling, TrellisConfig};
 
 use crate::error::CompressError;
 use crate::options::{ChromaSubsampling, CompressParams, OutputFormat};
+
+// ─── Fast JPEG Decoding ─────────────────────────────────────────────────────
+
+/// Decode a JPEG using zune-jpeg (SIMD-accelerated, 2-4x faster than image crate).
+/// Falls back to the image crate if zune-jpeg fails.
+fn decode_jpeg_fast(data: &[u8]) -> Result<DynamicImage, CompressError> {
+    use zune_jpeg::JpegDecoder;
+    use zune_jpeg::zune_core::colorspace::ColorSpace;
+    use zune_jpeg::zune_core::options::DecoderOptions;
+
+    let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGB);
+    let mut decoder = JpegDecoder::new_with_options(Cursor::new(data), options);
+
+    let pixels = match decoder.decode() {
+        Ok(p) => p,
+        Err(_) => {
+            // Fallback to image crate for edge cases (progressive, unusual markers)
+            return image::load_from_memory_with_format(data, ImageFormat::Jpeg)
+                .map_err(|e| CompressError::DecodeError(e.to_string()));
+        }
+    };
+
+    let info = decoder.info().ok_or_else(|| {
+        CompressError::DecodeError("Failed to get JPEG info from zune-jpeg".into())
+    })?;
+    let width = info.width as u32;
+    let height = info.height as u32;
+
+    RgbImage::from_raw(width, height, pixels)
+        .map(DynamicImage::ImageRgb8)
+        .ok_or_else(|| CompressError::DecodeError("Pixel buffer size mismatch".into()))
+}
+
+// ─── Fast Resizing ──────────────────────────────────────────────────────────
+
+/// Resize using fast_image_resize (SIMD-accelerated, ~5x faster than image crate Lanczos3).
+/// Uses CatmullRom (bicubic) which is visually close to Lanczos3 but much faster.
+fn resize_fast(img: &DynamicImage, new_w: u32, new_h: u32) -> DynamicImage {
+    use fast_image_resize as fir;
+
+    // Get source pixels as RGB8
+    let rgb = img.to_rgb8();
+    let (src_w, src_h) = rgb.dimensions();
+
+    // Build source image for fast_image_resize
+    let src = fir::images::Image::from_vec_u8(
+        src_w,
+        src_h,
+        rgb.into_raw(),
+        fir::PixelType::U8x3,
+    ).unwrap();
+
+    // Prepare destination
+    let mut dst = fir::images::Image::new(new_w, new_h, fir::PixelType::U8x3);
+
+    // Resize with CatmullRom (fast bicubic, ~2x faster than Lanczos3)
+    let mut resizer = fir::Resizer::new();
+    resizer.resize(
+        &src,
+        &mut dst,
+        &fir::ResizeOptions::new().resize_alg(fir::ResizeAlg::Convolution(fir::FilterType::CatmullRom)),
+    ).unwrap();
+
+    let dst_pixels = dst.into_vec();
+    RgbImage::from_raw(new_w, new_h, dst_pixels)
+        .map(DynamicImage::ImageRgb8)
+        .unwrap_or_else(|| {
+            // Fallback: should never happen, but be safe
+            img.resize_exact(new_w, new_h, image::imageops::FilterType::CatmullRom)
+        })
+}
 
 /// Maximum binary search iterations to prevent runaway loops.
 const MAX_BINARY_SEARCH_ITERATIONS: u32 = 10;
@@ -13,6 +84,11 @@ const MAX_BINARY_SEARCH_ITERATIONS: u32 = 10;
 const MAX_RESIZE_CYCLES: u32 = 4;
 /// Scale factor applied when auto-resizing to meet file size target.
 const RESIZE_SCALE_FACTOR: f64 = 0.75;
+
+/// Check if the raw bytes are actually a JPEG file (not GIF/BMP/TIFF mapped to Jpeg output).
+fn is_native_jpeg(data: &[u8]) -> bool {
+    data.len() >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF
+}
 
 /// Detected input format (also used as output format selector).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,7 +117,18 @@ pub fn compress_bytes(
     params: &CompressParams,
 ) -> Result<EngineResult, CompressError> {
     let original_format = detect_format(input)?;
-    let img = image::load_from_memory(input).map_err(|e| CompressError::DecodeError(e.to_string()))?;
+
+    // Use zune-jpeg for JPEG decoding (2-4x faster, SIMD-accelerated).
+    // For all other formats, use the image crate with format hint to skip re-detection.
+    let img = if original_format == DetectedFormat::Jpeg && is_native_jpeg(input) {
+        decode_jpeg_fast(input)?
+    } else {
+        // For PNG, WebP, GIF, BMP, TIFF (detected as Jpeg output format but not
+        // actually JPEG input), use the image crate which handles all formats.
+        image::load_from_memory(input)
+            .map_err(|e| CompressError::DecodeError(e.to_string()))?
+    };
+
     let output_format = resolve_output_format(params, original_format);
     let jpeg_exif = resolve_jpeg_exif_payload(input, original_format, output_format, params)?;
 
@@ -143,7 +230,7 @@ fn compress_to_target_size(
             break;
         }
 
-        img = Cow::Owned(img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3));
+        img = Cow::Owned(resize_fast(&img, new_w, new_h));
         resized = true;
     }
 
@@ -371,7 +458,7 @@ fn apply_resize_constraints<'a>(
     let new_w = ((orig_w as f64) * scale).round().max(1.0) as u32;
     let new_h = ((orig_h as f64) * scale).round().max(1.0) as u32;
 
-    Cow::Owned(img.resize_exact(new_w, new_h, image::imageops::FilterType::Lanczos3))
+    Cow::Owned(resize_fast(img, new_w, new_h))
 }
 
 // ─── WebP Encoding ───────────────────────────────────────────────────────────
@@ -574,8 +661,12 @@ pub fn benchmark_bytes(
     params: &CompressParams,
 ) -> Result<BenchmarkInfo, CompressError> {
     let format = detect_format(data)?;
-    let img = image::load_from_memory(data)
-        .map_err(|e| CompressError::DecodeError(e.to_string()))?;
+    let img = if format == DetectedFormat::Jpeg && is_native_jpeg(data) {
+        decode_jpeg_fast(data)?
+    } else {
+        image::load_from_memory(data)
+            .map_err(|e| CompressError::DecodeError(e.to_string()))?
+    };
 
     // Apply resize constraints so benchmark matches real output
     let img = apply_resize_constraints(&img, params.max_width, params.max_height);
