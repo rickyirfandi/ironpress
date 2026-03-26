@@ -300,7 +300,9 @@ fn compress_to_target_size(
 ) -> Result<EngineResult, CompressError> {
     let target = params.max_file_size as usize;
     let min_q = params.min_quality.min(100) as u8;
+    let initial_q = params.quality.min(100) as u8;
     let allow_resize = params.allow_resize != 0;
+    let quality_search = supports_quality_search(output_format);
 
     let mut img = Cow::Borrowed(original_img);
     let mut total_iterations: u32 = 0;
@@ -312,7 +314,6 @@ fn compress_to_target_size(
 
     for _resize_cycle in 0..MAX_RESIZE_CYCLES {
         // First, try at the requested quality — often it's already small enough
-        let initial_q = params.quality.min(100) as u8;
         let initial_encoded =
             encode_image_prepared(&prepared, &img, initial_q, output_format, params, jpeg_exif)?;
         total_iterations += 1;
@@ -329,46 +330,66 @@ fn compress_to_target_size(
             });
         }
 
-        // Binary search: find highest quality that fits under target
-        let search_result = binary_search_quality(
-            &prepared,
-            &img,
-            min_q,
-            initial_q.saturating_sub(1),
-            target,
-            output_format,
-            params,
-            jpeg_exif,
-        )?;
-        total_iterations += search_result.iterations;
+        if !quality_search {
+            if !allow_resize {
+                let (w, h) = prepared.dimensions();
+                return Ok(EngineResult {
+                    data: initial_encoded,
+                    width: w,
+                    height: h,
+                    quality_used: initial_q as u32,
+                    iterations: total_iterations,
+                    resized_to_fit: resized,
+                });
+            }
+        } else {
+            // Binary search: find highest quality that fits under target
+            let search_result = binary_search_quality(
+                &prepared,
+                &img,
+                min_q,
+                initial_q.saturating_sub(1),
+                target,
+                output_format,
+                params,
+                jpeg_exif,
+            )?;
+            total_iterations += search_result.iterations;
 
-        if let Some((best_data, best_q)) = search_result.best {
-            let (w, h) = prepared.dimensions();
-            return Ok(EngineResult {
-                data: best_data,
-                width: w,
-                height: h,
-                quality_used: best_q as u32,
-                iterations: total_iterations,
-                resized_to_fit: resized,
-            });
-        }
+            if let Some((best_data, best_q)) = search_result.best {
+                let (w, h) = prepared.dimensions();
+                return Ok(EngineResult {
+                    data: best_data,
+                    width: w,
+                    height: h,
+                    quality_used: best_q as u32,
+                    iterations: total_iterations,
+                    resized_to_fit: resized,
+                });
+            }
 
-        // Even min_quality didn't fit — try resize if allowed
-        if !allow_resize {
-            // Encode at min quality as best effort
-            let fallback =
-                encode_image_prepared(&prepared, &img, min_q, output_format, params, jpeg_exif)?;
-            total_iterations += 1;
-            let (w, h) = prepared.dimensions();
-            return Ok(EngineResult {
-                data: fallback,
-                width: w,
-                height: h,
-                quality_used: min_q as u32,
-                iterations: total_iterations,
-                resized_to_fit: false,
-            });
+            // Even min_quality didn't fit — try resize if allowed
+            if !allow_resize {
+                // Encode at min quality as best effort
+                let fallback = encode_image_prepared(
+                    &prepared,
+                    &img,
+                    min_q,
+                    output_format,
+                    params,
+                    jpeg_exif,
+                )?;
+                total_iterations += 1;
+                let (w, h) = prepared.dimensions();
+                return Ok(EngineResult {
+                    data: fallback,
+                    width: w,
+                    height: h,
+                    quality_used: min_q as u32,
+                    iterations: total_iterations,
+                    resized_to_fit: false,
+                });
+            }
         }
 
         // Downscale and retry
@@ -387,18 +408,29 @@ fn compress_to_target_size(
         prepared = prepare_pixels(&img, output_format);
     }
 
-    // Final fallback: return whatever we can at min quality at current size
-    let fallback = encode_image_prepared(&prepared, &img, min_q, output_format, params, jpeg_exif)?;
+    let fallback_q = if quality_search { min_q } else { initial_q };
+    let fallback = encode_image_prepared(
+        &prepared,
+        &img,
+        fallback_q,
+        output_format,
+        params,
+        jpeg_exif,
+    )?;
     total_iterations += 1;
     let (w, h) = prepared.dimensions();
     Ok(EngineResult {
         data: fallback,
         width: w,
         height: h,
-        quality_used: min_q as u32,
+        quality_used: fallback_q as u32,
         iterations: total_iterations,
         resized_to_fit: resized,
     })
+}
+
+fn supports_quality_search(format: DetectedFormat) -> bool {
+    matches!(format, DetectedFormat::Jpeg | DetectedFormat::WebpLossy)
 }
 
 struct SearchResult {

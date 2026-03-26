@@ -47,6 +47,25 @@ mod tests {
         buf
     }
 
+    fn test_image_png(width: u32, height: u32) -> Vec<u8> {
+        let mut img = image::RgbaImage::new(width, height);
+        for y in 0..height {
+            for x in 0..width {
+                let r = ((x * 255) / width.max(1)) as u8;
+                let g = ((y * 255) / height.max(1)) as u8;
+                let b = (((x + y) * 128) / (width + height).max(1)) as u8;
+                img.put_pixel(x, y, image::Rgba([r, g, b, 255]));
+            }
+        }
+        let dynamic = image::DynamicImage::ImageRgba8(img);
+        let mut buf = Vec::new();
+        let mut cursor = std::io::Cursor::new(&mut buf);
+        dynamic
+            .write_to(&mut cursor, image::ImageFormat::Png)
+            .unwrap();
+        buf
+    }
+
     /// Build a JPEG with an APP1/Exif segment for EXIF detection tests.
     fn jpeg_with_exif() -> Vec<u8> {
         let base = minimal_jpeg();
@@ -314,6 +333,26 @@ mod tests {
 
         assert_eq!(result.quality_used, 10);
         assert!(!result.resized_to_fit);
+    }
+
+    #[test]
+    fn target_size_png_skips_quality_binary_search() {
+        let input = test_image_png(512, 512);
+        let target: usize = 2048;
+
+        let mut params = CompressParams::default();
+        params.max_file_size = target as u32;
+        params.min_quality = 10;
+        params.allow_resize = 0;
+
+        let result = compress_bytes(&input, &params).unwrap();
+
+        assert!(!result.data.is_empty());
+        assert!(
+            result.iterations <= 1,
+            "PNG target-size should not binary search, got {} iterations",
+            result.iterations
+        );
     }
 
     // ─── Format Conversion ───────────────────────────────────────────
