@@ -43,39 +43,97 @@ fn decode_jpeg_fast(data: &[u8]) -> Result<DynamicImage, CompressError> {
 
 /// Resize using fast_image_resize (SIMD-accelerated, ~5x faster than image crate Lanczos3).
 /// Uses CatmullRom (bicubic) which is visually close to Lanczos3 but much faster.
+///
+/// Preserves the pixel format: RGB images stay RGB, RGBA images stay RGBA.
+/// Falls back to image crate resize if fast_image_resize fails.
 fn resize_fast(img: &DynamicImage, new_w: u32, new_h: u32) -> DynamicImage {
     use fast_image_resize as fir;
 
-    // Get source pixels as RGB8
+    // Guard against zero dimensions — fast_image_resize would panic.
+    let new_w = new_w.max(1);
+    let new_h = new_h.max(1);
+
+    let resize_opts = fir::ResizeOptions::new()
+        .resize_alg(fir::ResizeAlg::Convolution(fir::FilterType::CatmullRom));
+
+    // Try RGBA path first (preserves alpha for PNG), fall back to RGB.
+    match img {
+        DynamicImage::ImageRgb8(_) | DynamicImage::ImageLuma8(_) => {
+            resize_rgb8(img, new_w, new_h, &resize_opts)
+        }
+        _ => {
+            // RGBA path: preserves alpha channel for PNG and other formats
+            resize_rgba8(img, new_w, new_h, &resize_opts)
+        }
+    }
+}
+
+/// Resize as RGB8 (3 channels). Used for JPEG and grayscale inputs.
+fn resize_rgb8(
+    img: &DynamicImage,
+    new_w: u32,
+    new_h: u32,
+    opts: &fast_image_resize::ResizeOptions,
+) -> DynamicImage {
+    use fast_image_resize as fir;
+
     let rgb = img.to_rgb8();
     let (src_w, src_h) = rgb.dimensions();
 
-    // Build source image for fast_image_resize
-    let src = fir::images::Image::from_vec_u8(
-        src_w,
-        src_h,
-        rgb.into_raw(),
-        fir::PixelType::U8x3,
-    ).unwrap();
+    let src = match fir::images::Image::from_vec_u8(
+        src_w, src_h, rgb.into_raw(), fir::PixelType::U8x3,
+    ) {
+        Ok(s) => s,
+        Err(_) => return fallback_resize(img, new_w, new_h),
+    };
 
-    // Prepare destination
     let mut dst = fir::images::Image::new(new_w, new_h, fir::PixelType::U8x3);
-
-    // Resize with CatmullRom (fast bicubic, ~2x faster than Lanczos3)
     let mut resizer = fir::Resizer::new();
-    resizer.resize(
-        &src,
-        &mut dst,
-        &fir::ResizeOptions::new().resize_alg(fir::ResizeAlg::Convolution(fir::FilterType::CatmullRom)),
-    ).unwrap();
 
-    let dst_pixels = dst.into_vec();
-    RgbImage::from_raw(new_w, new_h, dst_pixels)
+    if resizer.resize(&src, &mut dst, opts).is_err() {
+        return fallback_resize(img, new_w, new_h);
+    }
+
+    RgbImage::from_raw(new_w, new_h, dst.into_vec())
         .map(DynamicImage::ImageRgb8)
-        .unwrap_or_else(|| {
-            // Fallback: should never happen, but be safe
-            img.resize_exact(new_w, new_h, image::imageops::FilterType::CatmullRom)
-        })
+        .unwrap_or_else(|| fallback_resize(img, new_w, new_h))
+}
+
+/// Resize as RGBA8 (4 channels). Used for PNG and WebP inputs that may have alpha.
+fn resize_rgba8(
+    img: &DynamicImage,
+    new_w: u32,
+    new_h: u32,
+    opts: &fast_image_resize::ResizeOptions,
+) -> DynamicImage {
+    use fast_image_resize as fir;
+    use image::RgbaImage;
+
+    let rgba = img.to_rgba8();
+    let (src_w, src_h) = rgba.dimensions();
+
+    let src = match fir::images::Image::from_vec_u8(
+        src_w, src_h, rgba.into_raw(), fir::PixelType::U8x4,
+    ) {
+        Ok(s) => s,
+        Err(_) => return fallback_resize(img, new_w, new_h),
+    };
+
+    let mut dst = fir::images::Image::new(new_w, new_h, fir::PixelType::U8x4);
+    let mut resizer = fir::Resizer::new();
+
+    if resizer.resize(&src, &mut dst, opts).is_err() {
+        return fallback_resize(img, new_w, new_h);
+    }
+
+    RgbaImage::from_raw(new_w, new_h, dst.into_vec())
+        .map(DynamicImage::ImageRgba8)
+        .unwrap_or_else(|| fallback_resize(img, new_w, new_h))
+}
+
+/// Fallback to image crate resize. Slower but always correct.
+fn fallback_resize(img: &DynamicImage, new_w: u32, new_h: u32) -> DynamicImage {
+    img.resize_exact(new_w, new_h, image::imageops::FilterType::CatmullRom)
 }
 
 /// Maximum binary search iterations to prevent runaway loops.
@@ -314,9 +372,20 @@ fn encode_jpeg(
     params: &CompressParams,
     jpeg_exif: Option<&[u8]>,
 ) -> Result<Vec<u8>, CompressError> {
-    let rgb = img.to_rgb8();
-    let (width, height) = rgb.dimensions();
-    let pixels = rgb.as_raw();
+    // Avoid redundant allocation when image is already RGB8 (common after decode_jpeg_fast).
+    // For a 4K image this saves ~36 MB of heap allocation per encode call.
+    let owned;
+    let (pixels, width, height) = match img {
+        DynamicImage::ImageRgb8(rgb) => {
+            let (w, h) = rgb.dimensions();
+            (rgb.as_raw().as_slice(), w, h)
+        }
+        other => {
+            owned = other.to_rgb8();
+            let (w, h) = owned.dimensions();
+            (owned.as_raw().as_slice(), w, h)
+        }
+    };
 
     let use_trellis = params.jpeg_trellis != 0;
     let progressive = params.jpeg_progressive != 0;
@@ -455,10 +524,11 @@ fn apply_resize_constraints<'a>(
     let scale_h = target_h as f64 / orig_h as f64;
     let scale = scale_w.min(scale_h);
 
-    let new_w = ((orig_w as f64) * scale).round().max(1.0) as u32;
-    let new_h = ((orig_h as f64) * scale).round().max(1.0) as u32;
+    let new_w = ((orig_w as f64) * scale).round() as u32;
+    let new_h = ((orig_h as f64) * scale).round() as u32;
 
-    Cow::Owned(resize_fast(img, new_w, new_h))
+    // resize_fast already clamps to min 1, but be explicit here too
+    Cow::Owned(resize_fast(img, new_w.max(1), new_h.max(1)))
 }
 
 // ─── WebP Encoding ───────────────────────────────────────────────────────────
@@ -467,31 +537,43 @@ fn encode_webp_lossless(
     img: &DynamicImage,
     _params: &CompressParams,
 ) -> Result<Vec<u8>, CompressError> {
-    let rgba = img.to_rgba8();
-    let (width, height) = rgba.dimensions();
     let mut buf = Vec::new();
     let encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut buf);
-    encoder
-        .encode(
-            rgba.as_raw(),
-            width,
-            height,
-            image::ExtendedColorType::Rgba8,
-        )
-        .map_err(|e| CompressError::EncodeError(format!("WebP encode failed: {e}")))?;
+
+    // Use native color type to avoid unnecessary conversion
+    match img {
+        DynamicImage::ImageRgb8(rgb) => {
+            let (w, h) = rgb.dimensions();
+            encoder.encode(rgb.as_raw(), w, h, image::ExtendedColorType::Rgb8)
+        }
+        other => {
+            let rgba = other.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            encoder.encode(rgba.as_raw(), w, h, image::ExtendedColorType::Rgba8)
+        }
+    }
+    .map_err(|e| CompressError::EncodeError(format!("WebP encode failed: {e}")))?;
+
     Ok(buf)
 }
 
 /// Encode image as lossy WebP using the `webp` crate.
+/// Uses RGB path when possible to avoid unnecessary RGBA conversion.
 fn encode_webp_lossy(
     img: &DynamicImage,
     quality: u8,
 ) -> Result<Vec<u8>, CompressError> {
-    let rgba = img.to_rgba8();
-    let (width, height) = (rgba.width(), rgba.height());
-
-    let encoder = webp::Encoder::from_rgba(rgba.as_raw(), width, height);
-    let mem = encoder.encode(quality as f32);
+    let mem = match img {
+        DynamicImage::ImageRgb8(rgb) => {
+            let encoder = webp::Encoder::from_rgb(rgb.as_raw(), rgb.width(), rgb.height());
+            encoder.encode(quality as f32)
+        }
+        other => {
+            let rgba = other.to_rgba8();
+            let encoder = webp::Encoder::from_rgba(rgba.as_raw(), rgba.width(), rgba.height());
+            encoder.encode(quality as f32)
+        }
+    };
 
     Ok(mem.to_vec())
 }
