@@ -430,8 +430,11 @@ fn encode_png(
     img: &DynamicImage,
     params: &CompressParams,
 ) -> Result<Vec<u8>, CompressError> {
-    // First encode to standard PNG in memory
-    let mut buf = Vec::new();
+    // First encode to standard PNG in memory.
+    // Pre-allocate with rough estimate to reduce reallocations.
+    let (w, h) = img.dimensions();
+    let estimated = (w as usize * h as usize).min(16 * 1024 * 1024); // cap estimate at 16 MB
+    let mut buf = Vec::with_capacity(estimated);
     let mut cursor = Cursor::new(&mut buf);
     img.write_to(&mut cursor, ImageFormat::Png)
         .map_err(|e| CompressError::EncodeError(format!("PNG encode failed: {e}")))?;
