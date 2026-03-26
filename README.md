@@ -1,172 +1,172 @@
-# ironpress
+<p align="center">
+  <img src="https://raw.githubusercontent.com/rickyirfandi/ironpress/master/asset/ironpress.png" alt="ironpress logo" width="200"/>
+</p>
 
-[![pub package](https://img.shields.io/pub/v/ironpress.svg)](https://pub.dev/packages/ironpress)
-[![Tests](https://github.com/rickyirfandi/ironpress/actions/workflows/test.yml/badge.svg)](https://github.com/rickyirfandi/ironpress/actions/workflows/test.yml)
-[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<h1 align="center">ironpress</h1>
 
-**High-performance image compression for Flutter, powered by Rust.**
+<p align="center">
+  <strong>Rust-powered image compression for Flutter.</strong>
+</p>
 
-Uses [mozjpeg-rs](https://crates.io/crates/mozjpeg-rs) (trellis quantization) for JPEG and [oxipng](https://crates.io/crates/oxipng) for PNG — delivering consistent compression results across the platforms bundled in the package.
+<p align="center">
+  <a href="https://pub.dev/packages/ironpress"><img src="https://img.shields.io/pub/v/ironpress.svg" alt="pub package"></a>
+  <a href="https://pub.dev/packages/ironpress/score"><img src="https://img.shields.io/pub/likes/ironpress" alt="pub likes"></a>
+  <a href="https://pub.dev/packages/ironpress/score"><img src="https://img.shields.io/pub/points/ironpress" alt="pub points"></a>
+  <a href="https://github.com/rickyirfandi/ironpress/actions/workflows/test.yml"><img src="https://github.com/rickyirfandi/ironpress/actions/workflows/test.yml/badge.svg" alt="tests"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license"></a>
+  <img src="https://img.shields.io/badge/platforms-android%20%7C%20iOS%20%7C%20windows-blue" alt="platforms">
+</p>
 
-## Why this package?
+---
 
-| Feature | ironpress | flutter_image_compress |
+ironpress compresses JPEG, PNG, and WebP images using mozjpeg, oxipng, and libwebp, compiled as native Rust libraries. mozjpeg and oxipng are **state-of-the-art compression engines** trusted by major CDNs and tech companies. All encoding runs in a single FFI call with no platform API dependencies, producing byte-identical output on every device. Accepts JPEG, PNG, WebP, GIF, BMP, and TIFF as input.
+
+## Features
+
+- **mozjpeg JPEG compression** with trellis quantization (25-35% smaller than standard encoders)
+- **oxipng PNG optimization**, lossless and multithreaded
+- **WebP lossy and lossless** encoding
+- **Target file size** in a single FFI call (binary search runs entirely in Rust, zero round-trips)
+- **Parallel batch compression** via Rayon with work-stealing across all cores
+- **Byte-identical output** on Android, iOS, and Windows
+- **Progress callbacks** and **cancellation tokens** for batch operations
+- **Quality presets** (low, medium, high) for common use cases
+- **Image probe** reads dimensions, format, and EXIF presence without decoding pixels
+- **Quality benchmark sweep** to find optimal compression settings
+- **EXIF metadata preservation** for JPEG-to-JPEG output
+- **Panic-safe batch processing** (one corrupt image never kills the batch)
+
+## Platform Support
+
+| Platform | Architectures | Status |
 |---|---|---|
-| Engine | Rust (mozjpeg + oxipng) | Platform APIs (varies by OS) |
-| JPEG quality | Trellis quantization (state of the art) | Basic encoder |
-| Consistent output | Same result on bundled platforms | Differs per OS/device |
-| Target file size | Binary search (single FFI call) | Not supported |
-| Batch compression | Parallel via isolates | Not supported |
-| Cross-compile | Rust core with prebuilt native binaries | Platform channels |
-| PNG optimization | oxipng (lossless, multithreaded) | Basic |
+| Android | arm64, armv7, x86_64 | Prebuilt |
+| iOS | arm64 (device + simulator) | Prebuilt |
+| Windows | x86_64 | Prebuilt |
+| macOS | arm64, x86_64 | Build from source |
+| Linux | x86_64 | Build from source |
 
-## Benchmarks
+Web is not supported (dart:ffi is unavailable on Flutter Web).
 
-Measured on a 4MP JPEG (3264×2448, 4.2 MB original) on Android arm64:
+## Getting Started
 
-| | ironpress | flutter_image_compress |
-|---|---|---|
-| Output size at q80 | **410 KB** | 590 KB |
-| Output size at q75 | **340 KB** | 490 KB |
-| Compression time (single image) | ~180 ms | ~210 ms |
-| Consistent across devices | ✅ Same bytes on all platforms | ❌ Varies by OS/encoder version |
-| Target size (200 KB) | ✅ Binary search, 1 FFI call | ❌ Not supported |
-| Batch 10 images (parallel) | ✅ ~1.1 s | ❌ Not supported |
-
-> mozjpeg's trellis quantization consistently produces **25–35% smaller files** at equivalent visual quality compared to standard libjpeg encoders.
-
-## Installation
+### Installation
 
 ```yaml
 dependencies:
   ironpress: ^0.1.0
 ```
 
-## Quick Start
+### Basic Usage
 
 ```dart
 import 'package:ironpress/ironpress.dart';
 
-// Simple compression
 final result = await Ironpress.compressFile(
   'photo.jpg',
   quality: 80,
 );
 print(result);
-// CompressResult(4.2 MB → 380.0 KB [91.0%], 4000x3000, q80, 1iter)
+// CompressResult(4.2 MB -> 380.0 KB [91.0%], 4000x3000, q80, 1iter)
+```
 
-// Target file size — the killer feature
+No ProGuard or R8 rules required. ironpress loads native libraries via dart:ffi with no Java or Kotlin code.
+
+## Usage
+
+### Target File Size
+
+Pass `maxFileSize` and the engine handles the entire binary search in Rust with no round-trips to Dart.
+
+```dart
 final result = await Ironpress.compressFile(
   'photo.jpg',
   maxFileSize: 200 * 1024, // 200 KB
 );
-print('Quality: ${result.qualityUsed}, Tries: ${result.iterations}');
+print('Quality: ${result.qualityUsed}, Iterations: ${result.iterations}');
+```
 
-// Compress bytes in memory
-final bytes = await File('photo.jpg').readAsBytes();
-final result = await Ironpress.compressBytes(
-  bytes,
-  quality: 75,
-  maxWidth: 1920,
-);
+### Batch Compression
 
-// Batch compress (parallel)
+Compress entire galleries in parallel across all available cores. Progress callbacks and cancellation are built in.
+
+```dart
+final token = CancellationToken();
+
 final batch = await Ironpress.compressBatch(
   photos.map((p) => CompressInput(path: p)).toList(),
   maxFileSize: 300 * 1024,
   maxWidth: 1920,
   threadCount: 4,
+  onProgress: (done, total) => setState(() => progress = done / total),
+  cancellationToken: token,
 );
+
 print(batch);
+// BatchCompressResult(198/200 ok, 2 failed, 6823ms, 29.3 img/s, 4.1 MB/s)
 ```
 
-## API Reference
+### Quality Presets
 
-### `Ironpress.compressFile(path, {...})`
+Built-in presets for common use cases.
 
-Compress an image file and return bytes + stats.
+```dart
+final result = await Ironpress.compressFile(
+  'photo.jpg',
+  preset: CompressPreset.medium, // q80, max 1920px
+);
+```
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `path` | `String` | required | Absolute path to input image |
-| `quality` | `int` | `80` | JPEG quality 0-100 (ignored for PNG) |
-| `maxWidth` | `int?` | `null` | Max width constraint (aspect ratio preserved) |
-| `maxHeight` | `int?` | `null` | Max height constraint (aspect ratio preserved) |
-| `maxFileSize` | `int?` | `null` | Target max output size in bytes |
-| `minQuality` | `int` | `30` | Quality floor for file size search |
-| `allowResize` | `bool` | `true` | Auto-downscale if quality can't hit target |
-| `format` | `CompressFormat` | `auto` | Output format (auto/jpeg/png) |
-| `keepMetadata` | `bool` | `false` | Preserve JPEG EXIF metadata (see [Metadata Handling](#metadata-handling)) |
-| `jpeg` | `JpegOptions` | defaults | Progressive, trellis, chroma subsampling |
-| `png` | `PngOptions` | defaults | Optimization level 0-6 |
+## Benchmarks
 
-### `Ironpress.compressFileToFile(input, output, {...})`
+Measured on a 4MP JPEG (3264x2448, 4.2 MB) on Android arm64:
 
-Same parameters as `compressFile`, writes result to `output` path. Returns `CompressResult` with `data: null`.
+| Scenario | Result |
+|---|---|
+| Output size at q80 | 410 KB (90% reduction) |
+| Output size at q75 | 340 KB (92% reduction) |
+| Single image compression | ~180 ms |
+| Target size to 200 KB | Single FFI call |
+| Batch 10 images (parallel) | ~1.1 s |
 
-### `Ironpress.compressBytes(data, {...})`
+mozjpeg's trellis quantization produces 25-35% smaller files at equivalent visual quality compared to standard libjpeg encoders.
 
-Same parameters, accepts `Uint8List` input.
+## Advanced
 
-### `Ironpress.compressBatch(inputs, {...})`
+### JPEG Options
 
-Compress multiple images concurrently. Additional parameter:
+```dart
+final result = await Ironpress.compressFile(
+  'photo.jpg',
+  quality: 85,
+  jpeg: const JpegOptions(
+    progressive: true,
+    trellis: true,
+    chromaSubsampling: ChromaSubsampling.yuv420,
+  ),
+);
+```
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `threadCount` | `int` | `0` | Rayon worker threads; `0` auto-selects `cores - 2` |
-| `chunkSize` | `int` | `8` | Max images processed per native chunk to bound memory |
+### Metadata Handling
 
-### `CompressResult`
+`keepMetadata: true` preserves EXIF data for JPEG-to-JPEG output. When converting to PNG or WebP, metadata is silently dropped. The flag is always safe to pass.
 
-| Property | Type | Description |
-|---|---|---|
-| `data` | `Uint8List?` | Compressed bytes (null for file-to-file) |
-| `originalSize` | `int` | Original input size in bytes |
-| `compressedSize` | `int` | Output size in bytes |
-| `ratio` | `double` | Compression ratio (0.35 = 65% reduction) |
-| `reductionPercent` | `String` | Human-readable (e.g., "65.0%") |
-| `width` | `int` | Final width (may differ if resized) |
-| `height` | `int` | Final height |
-| `qualityUsed` | `int` | Actual quality used by encoder |
-| `iterations` | `int` | Compression attempts |
-| `resizedToFit` | `bool` | Whether auto-resize was triggered |
-| `isSuccess` | `bool` | Whether compression succeeded |
-| `errorCode` | `int?` | Native error code for failed batch items |
-| `errorMessage` | `String?` | Native error message for failed batch items |
+### Diagnostics
 
-## How Target File Size Works
+```dart
+// Read image metadata without decoding pixels
+final probe = await Ironpress.probeFile('photo.jpg');
+print(probe); // ImageProbe(3264x2448, JPEG, 4.2 MB, 7.99 MP)
 
-When `maxFileSize` is set, the engine runs entirely in Rust:
-
-1. Decode image once into memory
-2. Apply resize constraints
-3. Try encoding at requested quality
-4. If too large → binary search for highest quality that fits
-5. If min quality still too large → auto-downscale 75% and retry
-6. Return best result with stats
-
-The entire loop is a **single FFI call**. No round-trips between Dart and native.
-
-## Platform Support
-
-| Platform | Architecture | Status |
-|---|---|---|
-| Android | arm64-v8a | ✅ |
-| Android | armeabi-v7a | ✅ |
-| Android | x86_64 (emulator) | ✅ |
-| Windows | x86_64 | ✅ |
-| iOS | arm64 (device) | ✅ |
-| iOS | arm64 (simulator) | ✅ |
-| macOS | arm64 / x86_64 | 🔧 Build from source |
-| Linux | x86_64 | 🔧 Build from source |
-| **Web** | — | **❌ Not supported** |
-
-> **Web**: ironpress uses `dart:ffi` to call native Rust code. Flutter Web does not support `dart:ffi`, so this package cannot run on Web. There is no WASM target at this time.
+// Find the optimal quality setting for your image
+final bench = await Ironpress.benchmarkFile('photo.jpg');
+print(bench.recommendedQuality); // e.g., 82
+for (final entry in bench.entries) {
+  print(entry); // q95: 520 KB (12.4%, 45ms)
+}
+```
 
 ## Size Impact
-
-The precompiled binaries add approximately:
 
 | What | Size |
 |---|---|
@@ -176,59 +176,18 @@ The precompiled binaries add approximately:
 
 Android App Bundles automatically include only the ABI matching the user's device.
 
-## Advanced: JPEG Options
+## API Reference
 
-```dart
-final result = await Ironpress.compressFile(
-  'photo.jpg',
-  quality: 85,
-  jpeg: const JpegOptions(
-    progressive: true,           // Smaller files, progressive rendering
-    trellis: true,               // mozjpeg's killer feature
-    chromaSubsampling: ChromaSubsampling.yuv420, // Best compression
-  ),
-);
-```
+Full API documentation is available on [pub.dev](https://pub.dev/documentation/ironpress/latest/).
 
-## Metadata Handling
+- `Ironpress.compressFile()` - Compress a file, return bytes + stats
+- `Ironpress.compressFileToFile()` - Compress file to file on disk
+- `Ironpress.compressBytes()` - Compress in-memory bytes
+- `Ironpress.compressBatch()` - Parallel batch compression
+- `Ironpress.probeFile()` / `probeBytes()` - Read image metadata without decoding
+- `Ironpress.benchmarkFile()` / `benchmarkBytes()` - Quality sweep across 9 levels
 
-When `keepMetadata: true` is set:
-
-| Scenario | Behavior |
-|---|---|
-| JPEG → JPEG | EXIF data is preserved in the output |
-| JPEG → PNG/WebP | Metadata is **silently dropped** (these formats use different metadata containers) |
-| PNG → any | Metadata is silently dropped (PNG EXIF/eXIf chunk extraction not yet supported) |
-| WebP → any | Metadata is silently dropped |
-
-This means `keepMetadata: true` is always safe to pass — it will never throw an error. It simply preserves what it can.
-
-## Input Limits
-
-The Rust engine enforces a **256 MB maximum input size** per image. Files or buffers exceeding this limit return error code `-5`. This prevents accidental OOM from extremely large inputs.
-
-## Android: R8 / ProGuard
-
-**No ProGuard or R8 rules are needed.** ironpress loads its native `.so` library via `dart:ffi` (`DynamicLibrary.open`), which bypasses the Java/Kotlin layer entirely. R8/ProGuard only strip Java/Kotlin code and do not affect native libraries bundled in `jniLibs/`.
-
-The package contains no Java, Kotlin, or JNI code — the Android module exists only to bundle the precompiled `.so` files into your APK/App Bundle.
-
-## Error Codes
-
-When compression fails, `CompressException` or batch item errors include a numeric error code:
-
-| Code | Meaning |
-|---|---|
-| `-1` | Null pointer or missing input (no file path or data) |
-| `-2` | Invalid UTF-8 in path or empty input buffer |
-| `-3` | Failed to read input file |
-| `-4` | Failed to write output file |
-| `-5` | Input too large (exceeds 256 MB limit) |
-| `-10` | Compression engine error (decode failure, unsupported format, etc.) |
-| `-99` | Internal panic during batch item (OOM or corrupt image — other items unaffected) |
-| `-100` | Batch isolate crashed unexpectedly |
-
-## Migration from flutter_image_compress
+## Migrating from flutter_image_compress
 
 ```dart
 // Before
@@ -251,9 +210,7 @@ final bytes = result.data; // Same Uint8List
 
 ## Building from Source
 
-This snapshot ships prebuilt Android and Windows binaries.
-
-If you want to compile the Rust native libraries yourself:
+This release ships prebuilt Android, iOS, and Windows binaries. macOS and Linux require building from source.
 
 ```bash
 # Prerequisites
@@ -269,6 +226,26 @@ cargo ndk --target x86_64-linux-android --platform 21 build --release
 # Build Windows
 cargo build --release
 ```
+
+<details>
+<summary><strong>Error Codes</strong></summary>
+
+| Code | Meaning |
+|---|---|
+| `-1` | Null pointer or missing input (no file path or data) |
+| `-2` | Invalid UTF-8 in path or empty input buffer |
+| `-3` | Failed to read input file |
+| `-4` | Failed to write output file |
+| `-5` | Input too large (exceeds 256 MB limit) |
+| `-10` | Compression engine error (decode failure, unsupported format) |
+| `-99` | Internal panic during batch item (OOM or corrupt image, other items unaffected) |
+| `-100` | Batch isolate crashed unexpectedly |
+
+</details>
+
+## Contributing
+
+Contributions are welcome. Please open an issue before submitting a pull request.
 
 ## License
 
