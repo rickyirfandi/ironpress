@@ -36,9 +36,9 @@
 - **Format conversion**: auto-detect input, choose output format (JPEG / PNG / WebP lossy / WebP lossless)
 
 ### Platform support
-- Android: `arm64-v8a`, `armeabi-v7a`, `x86_64` (precompiled `.so`)
+- Android: `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64` (precompiled `.so`)
 - iOS: device + simulator (precompiled `xcframework`)
 - Windows: `x86_64` (precompiled `.dll`)
-- Linux: `x86_64` (build from source — see README)
-- macOS: `arm64` + `x86_64` universal (build from source — see README)
+- Linux: `x86_64` (precompiled `.so`)
+- macOS: `arm64` + `x86_64` universal (precompiled `.dylib`)
 - Web: not supported (`dart:ffi` is unavailable on Flutter Web)

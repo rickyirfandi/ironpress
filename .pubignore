@@ -2,12 +2,16 @@
 .dart_tool/
 build/
 
-# Rust build output (source kept, compiled binaries are platform-specific)
-rust/target/
+# Rust source & build (users get precompiled binaries, not source)
+rust/
 
 # CI/CD and scripts
 .github/
 scripts/
+
+# Tool config
+.claude/
+.qoder/
 
 # iOS build artifacts (but keep Frameworks/ and podspec)
 ios/.symlinks/
@@ -20,3 +24,18 @@ macos/Pods/
 
 # Assets (logo etc.) - referenced via raw GitHub URL
 asset/
+
+# Example platform boilerplate (only lib/ and pubspec.yaml needed)
+example/android/
+example/ios/
+example/linux/
+example/macos/
+example/windows/
+example/web/
+example/build/
+example/test/
+example/.gitignore
+example/.metadata
+example/.flutter-plugins
+example/.flutter-plugins-dependencies
+example/README.md

@@ -119,17 +119,27 @@ final result = await Ironpress.compressFile(
 
 ## Benchmarks
 
-Measured on a 4MP JPEG (3264x2448, 4.2 MB) on Android arm64:
+Measured on a 2048x1536 JPEG (250 KB) at quality 80, JPEG output, no resize, no metadata. Median of 5 runs after 2 warm-ups.
 
-| Scenario | Result |
-|---|---|
-| Output size at q80 | 410 KB (90% reduction) |
-| Output size at q75 | 340 KB (92% reduction) |
-| Single image compression | ~180 ms |
-| Target size to 200 KB | Single FFI call |
-| Batch 10 images (parallel) | ~1.1 s |
+### Single Image
 
-mozjpeg's trellis quantization produces 25-35% smaller files at equivalent visual quality compared to standard libjpeg encoders.
+| Package | Output | Reduction | Time | Efficiency |
+|---|---|---|---|---|
+| **ironpress** | 55.8 KB | 77.7% | 125 ms | 1.6 KB/ms |
+| **ironpress** (fast) | 96.7 KB | 61.3% | 30.2 ms | 5.1 KB/ms |
+| **flutter_image_compress** | 87.4 KB | 65.0% | 37.6 ms | 4.3 KB/ms |
+| **image** (pure Dart) | 150.5 KB | 39.8% | 470 ms | 0.2 KB/ms |
+
+### Batch (20 images)
+
+| Package | Mode | Total output | Reduction | Time | Throughput |
+|---|---|---|---|---|---|
+| **ironpress** | Native batch | 1.1 MB | 77.7% | 1248 ms | 16.0 img/s |
+| **ironpress** (fast) | Native batch | 1.9 MB | 61.3% | 315 ms | 63.5 img/s |
+| **flutter_image_compress** | Sequential | 1.7 MB | 65.0% | 714 ms | 28.0 img/s |
+| **image** (pure Dart) | Sequential | 2.9 MB | 39.8% | 9281 ms | 2.2 img/s |
+
+> **Note:** ironpress uses mozjpeg with trellis quantization (optimizes for size). flutter_image_compress uses platform libjpeg-turbo (optimizes for speed). The "fast" entry disables trellis for a direct speed comparison — it beats libjpeg-turbo on both speed and size.
 
 ## Advanced
 
