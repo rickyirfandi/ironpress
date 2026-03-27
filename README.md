@@ -195,14 +195,17 @@ Android App Bundles automatically include only the ABI matching the user's devic
 
 ## API Reference
 
-Full API documentation is available on [pub.dev](https://pub.dev/documentation/ironpress/latest/).
+Full API documentation is available in [API.md](https://github.com/rickyirfandi/ironpress/blob/master/API.md) and on [pub.dev](https://pub.dev/documentation/ironpress/latest/).
 
-- `Ironpress.compressFile()` - Compress a file, return bytes + stats
-- `Ironpress.compressFileToFile()` - Compress file to file on disk
-- `Ironpress.compressBytes()` - Compress in-memory bytes
-- `Ironpress.compressBatch()` - Parallel batch compression
-- `Ironpress.probeFile()` / `probeBytes()` - Read image metadata without decoding
-- `Ironpress.benchmarkFile()` / `benchmarkBytes()` - Quality sweep across 9 levels
+| Method | Description |
+|---|---|
+| `Ironpress.compressFile()` | Compress a file, return bytes + stats |
+| `Ironpress.compressFileToFile()` | Compress file to file on disk (no memory copy) |
+| `Ironpress.compressBytes()` | Compress in-memory `Uint8List` |
+| `Ironpress.compressBatch()` | Parallel batch compression with progress + cancellation |
+| `Ironpress.probeFile()` / `probeBytes()` | Read image metadata without decoding pixels |
+| `Ironpress.benchmarkFile()` / `benchmarkBytes()` | Quality sweep to find optimal settings |
+| `Ironpress.nativeVersion` | Verify loaded native library version |
 
 ## Migrating from flutter_image_compress
 
