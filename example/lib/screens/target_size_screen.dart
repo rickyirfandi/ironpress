@@ -20,6 +20,7 @@ class _TargetSizeScreenState extends State<TargetSizeScreen> {
   double _minQuality = 30;
   bool _allowResize = true;
   bool _loading = false;
+  int _requestId = 0;
   Uint8List? _original;
   CompressResult? _result;
 
@@ -37,23 +38,30 @@ class _TargetSizeScreenState extends State<TargetSizeScreen> {
 
   Future<void> _compress() async {
     if (_original == null) return;
+    final requestId = ++_requestId;
     setState(() => _loading = true);
     try {
       final result = await Ironpress.compressBytes(
         _original!,
+        format: CompressFormat.jpeg,
         maxFileSize: (_targetKB * 1024).round(),
         minQuality: _minQuality.round(),
         allowResize: _allowResize,
       );
+      if (!mounted || requestId != _requestId) {
+        return;
+      }
       setState(() => _result = result);
     } catch (e) {
-      if (mounted) {
+      if (mounted && requestId == _requestId) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
-      setState(() => _loading = false);
+      if (mounted && requestId == _requestId) {
+        setState(() => _loading = false);
+      }
     }
   }
 

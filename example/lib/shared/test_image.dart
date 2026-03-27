@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
 
 /// Loads a test image for demo screens.
 ///
@@ -18,7 +19,7 @@ Future<Uint8List> loadTestImage() async {
   return _generateTestImage();
 }
 
-/// Generates a test image programmatically using dart:ui.
+/// Generates a JPEG test image programmatically using dart:ui.
 ///
 /// Creates a 2048x1536 image (3.1 MP, typical phone photo) with gradients
 /// and shapes so compression demos produce meaningful results.
@@ -112,7 +113,13 @@ Future<Uint8List> _generateTestImage() async {
     return syntheticJpeg();
   }
 
-  return byteData.buffer.asUint8List();
+  final pngBytes = byteData.buffer.asUint8List();
+  final decoded = img.decodeImage(pngBytes);
+  if (decoded == null) {
+    return syntheticJpeg();
+  }
+
+  return Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
 }
 
 /// Minimal valid JPEG (1x1 white pixel) — last-resort fallback.
