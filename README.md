@@ -178,13 +178,20 @@ for (final entry in bench.entries) {
 
 ## Size Impact
 
-| What | Size |
+| Platform | Native library |
 |---|---|
-| Per-platform native library | ~2-3 MB |
-| App download increase (Play Store, arm64) | ~2 MB |
-| pub.dev package (Android + Windows) | ~7-9 MB |
+| Android arm64 | 2 MB |
+| Android armv7 | 1 MB |
+| Android x86 | 3 MB |
+| Android x86_64 | 3 MB |
+| iOS arm64 (device) | 9 MB |
+| iOS simulator (arm64 + x86_64) | 18 MB |
+| Linux x86_64 | 3 MB |
+| macOS universal (arm64 + x86_64) | 5 MB |
+| Windows x86_64 | 3 MB |
+| **pub.dev package (all platforms)** | **19 MB** |
 
-Android App Bundles automatically include only the ABI matching the user's device.
+Android App Bundles automatically include only the ABI matching the user's device (~2 MB for arm64).
 
 ## API Reference
 
@@ -259,6 +266,6 @@ Contributions are welcome. Please open an issue before submitting a pull request
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT License — Copyright (c) 2026 [Ricky Irfandi](https://github.com/rickyirfandi). See [LICENSE](LICENSE) for details.
 
 Rust compression engines: [mozjpeg-rs](https://crates.io/crates/mozjpeg-rs) (BSD-3), [oxipng](https://crates.io/crates/oxipng) (MIT).
