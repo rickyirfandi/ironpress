@@ -1,11 +1,9 @@
 name: ironpress
 description: >
-  High-performance image compression powered by Rust.
-  Uses mozjpeg for JPEG, oxipng for PNG, and WebP (lossy + lossless).
-  Accepts JPEG, PNG, WebP, GIF, BMP, TIFF as input.
-  Features binary-search file size targeting, batch processing,
-  and consistent cross-platform output.
-version: 0.1.0
+  High-performance Rust-powered Flutter image compression for JPEG, PNG,
+  and WebP with batch processing, target-size compression, and metadata
+  probing.
+version: 0.2.0
 homepage: https://github.com/rickyirfandi/ironpress
 repository: https://github.com/rickyirfandi/ironpress
 issue_tracker: https://github.com/rickyirfandi/ironpress/issues

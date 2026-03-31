@@ -3,6 +3,8 @@
 Complete API documentation for the `ironpress` Flutter plugin.
 
 > For quick-start examples, see the main [README](README.md).
+>
+> Desktop note: packaged Flutter desktop apps should load the bundled native library by name. When running directly from this package checkout, ironpress also probes the repo `windows/libs`, `linux/libs`, and `macos/libs` directories.
 
 ---
 
@@ -186,6 +188,8 @@ final webpResult = await Ironpress.compressBytes(
 
 Batch compress multiple images using Rust's rayon thread pool.
 
+Batch work is orchestrated chunk-by-chunk. Each chunk is processed natively, progress is reported after each completed chunk, and cancellation is observed before the next chunk starts. Already-completed results are preserved when cancellation is requested.
+
 ```dart
 static Future<BatchCompressResult> compressBatch(
   List<CompressInput> inputs, {
@@ -215,6 +219,10 @@ static Future<BatchCompressResult> compressBatch(
 | `chunkSize` | `int` | `8` | Images decoded simultaneously per chunk. Controls peak memory (~36 MB per 4K image). Between chunks, pixel buffers are freed. |
 | `onProgress` | `Function?` | `null` | Called on the main thread with `(completed, total)`. Safe to call `setState` directly. |
 | `cancellationToken` | `CancellationToken?` | `null` | Cancel between chunks. Returns partial results for completed chunks. |
+
+Validation note: `threadCount` must be `>= 0`, `chunkSize` must be `> 0`, and numeric resize/size arguments must be positive and fit the native `u32` ABI.
+
+Behavior note: `onProgress` fires after each completed chunk and emits the final `(total, total)` callback exactly once. `CancellationToken.cancel()` stops scheduling later chunks after the current chunk finishes.
 
 **Safety guarantees:**
 - Each item is panic-safe: a corrupt image produces an error result, not a process crash.
@@ -504,7 +512,7 @@ Aggregate result of a batch compression operation.
 | Field | Type | Description |
 |---|---|---|
 | `results` | `List<CompressResult>` | Individual results, one per input. |
-| `elapsedMs` | `int` | Total wall-clock time (measured in Rust, excludes FFI overhead). |
+| `elapsedMs` | `int` | Total wall-clock time for the full batch operation (measured on the Dart side). |
 
 **Computed properties:**
 
@@ -601,9 +609,12 @@ Token for cancelling batch compression between chunks.
 
 ```dart
 class CancellationToken {
-  bool get isCancelled;  // Whether cancellation was requested
-  void cancel();         // Request cancellation
-  void reset();          // Reset for reuse
+  bool get isCancelled;              // Whether cancellation was requested
+  void cancel();                     // Request cancellation
+  void reset();                      // Reset for reuse
+  void Function() addListener(       // Register a callback; returns a disposer
+    void Function() listener,
+  );
 }
 ```
 

@@ -206,16 +206,35 @@ class CompressInput {
 /// ```
 class CancellationToken {
   bool _cancelled = false;
+  final Set<void Function()> _listeners = <void Function()>{};
 
   /// Whether cancellation has been requested.
   bool get isCancelled => _cancelled;
 
   /// Request cancellation. The batch will stop after the current chunk
   /// completes and return partial results.
-  void cancel() => _cancelled = true;
+  void cancel() {
+    if (_cancelled) {
+      return;
+    }
+    _cancelled = true;
+    for (final listener in List<void Function()>.from(_listeners)) {
+      listener();
+    }
+  }
 
   /// Reset the token for reuse.
   void reset() => _cancelled = false;
+
+  /// Registers a callback that runs when [cancel] is invoked.
+  ///
+  /// Returns a disposer that removes the listener.
+  void Function() addListener(void Function() listener) {
+    _listeners.add(listener);
+    return () {
+      _listeners.remove(listener);
+    };
+  }
 }
 
 // ─── Result ──────────────────────────────────────────────────────────────────
@@ -313,7 +332,8 @@ class BatchCompressResult {
   final List<CompressResult> results;
 
   /// Total wall-clock time for the entire batch (milliseconds).
-  /// This is measured inside Rust, so it excludes FFI overhead.
+  ///
+  /// This is measured on the Dart side for the full batch operation.
   final int elapsedMs;
 
   /// Number of successful compression results.
@@ -381,7 +401,7 @@ enum ImageFormat {
       case 4:
         return webp;
       default:
-        return jpeg;
+        throw StateError('Unknown native image format value: $v');
     }
   }
 

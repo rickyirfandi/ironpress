@@ -3,6 +3,7 @@ use std::io::Cursor;
 
 use image::{DynamicImage, GenericImageView, ImageFormat, ImageReader, RgbImage};
 use mozjpeg_rs::{Preset, Subsampling, TrellisConfig};
+use oxipng::StripChunks;
 
 use crate::error::CompressError;
 use crate::options::{ChromaSubsampling, CompressParams, OutputFormat};
@@ -150,6 +151,117 @@ fn is_native_jpeg(data: &[u8]) -> bool {
     data.len() >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF
 }
 
+fn input_format_hint(data: &[u8]) -> Option<ImageFormat> {
+    if is_native_jpeg(data) {
+        return Some(ImageFormat::Jpeg);
+    }
+
+    if data.len() >= 4 && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47
+    {
+        return Some(ImageFormat::Png);
+    }
+
+    if data.len() >= 16 && data[0..4] == *b"RIFF" && data[8..12] == *b"WEBP" {
+        return Some(ImageFormat::WebP);
+    }
+
+    if data.len() >= 6 && &data[0..3] == b"GIF" {
+        return Some(ImageFormat::Gif);
+    }
+
+    if data.len() >= 2 && data[0] == 0x42 && data[1] == 0x4D {
+        return Some(ImageFormat::Bmp);
+    }
+
+    if data.len() >= 4
+        && ((data[0] == 0x49 && data[1] == 0x49) || (data[0] == 0x4D && data[1] == 0x4D))
+    {
+        return Some(ImageFormat::Tiff);
+    }
+
+    None
+}
+
+fn decode_image_with_hint(
+    data: &[u8],
+    detected: DetectedFormat,
+) -> Result<DynamicImage, CompressError> {
+    if detected == DetectedFormat::Jpeg && is_native_jpeg(data) {
+        return decode_jpeg_fast(data);
+    }
+
+    if let Some(format_hint) = input_format_hint(data) {
+        return image::load_from_memory_with_format(data, format_hint)
+            .map_err(|e| CompressError::DecodeError(e.to_string()));
+    }
+
+    image::load_from_memory(data).map_err(|e| CompressError::DecodeError(e.to_string()))
+}
+
+fn is_apng(data: &[u8]) -> bool {
+    if data.len() < 12 {
+        return false;
+    }
+
+    let mut offset = 8usize;
+    while offset + 8 <= data.len() {
+        let chunk_len = u32::from_be_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]) as usize;
+        let chunk_type = &data[offset + 4..offset + 8];
+
+        if chunk_type == b"acTL" {
+            return true;
+        }
+
+        if chunk_type == b"IEND" || offset + 12 + chunk_len > data.len() {
+            break;
+        }
+
+        offset += 12 + chunk_len;
+    }
+
+    false
+}
+
+fn can_direct_optimize_png(
+    input: &[u8],
+    original_format: DetectedFormat,
+    output_format: DetectedFormat,
+    params: &CompressParams,
+) -> bool {
+    original_format == DetectedFormat::Png
+        && output_format == DetectedFormat::Png
+        && params.max_width == 0
+        && params.max_height == 0
+        && params.max_file_size == 0
+        && !is_apng(input)
+}
+
+fn optimize_png_direct(
+    input: &[u8],
+    params: &CompressParams,
+) -> Result<EngineResult, CompressError> {
+    let probe = probe_bytes(input)?;
+    let mut options = oxipng::Options::from_preset(params.png_optimization_level.min(6) as u8);
+    options.strip = StripChunks::All;
+
+    let optimized = oxipng::optimize_from_memory(input, &options)
+        .map_err(|e| CompressError::EncodeError(format!("PNG optimization failed: {e}")))?;
+
+    Ok(EngineResult {
+        data: optimized,
+        width: probe.width,
+        height: probe.height,
+        quality_used: params.quality.min(100),
+        iterations: 1,
+        resized_to_fit: false,
+    })
+}
+
 /// Detected input format (also used as output format selector).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetectedFormat {
@@ -257,17 +369,13 @@ pub fn compress_bytes(
     params: &CompressParams,
 ) -> Result<EngineResult, CompressError> {
     let original_format = detect_format(input)?;
-
-    // Use zune-jpeg for JPEG decoding (2-4x faster, SIMD-accelerated).
-    // For all other formats, use the image crate with format hint to skip re-detection.
-    let img = if original_format == DetectedFormat::Jpeg && is_native_jpeg(input) {
-        decode_jpeg_fast(input)?
-    } else {
-        // For PNG, WebP, GIF, BMP, TIFF (detected as Jpeg output format but not
-        // actually JPEG input), use the image crate which handles all formats.
-        image::load_from_memory(input).map_err(|e| CompressError::DecodeError(e.to_string()))?
-    };
     let output_format = resolve_output_format(params, original_format);
+
+    if can_direct_optimize_png(input, original_format, output_format, params) {
+        return optimize_png_direct(input, params);
+    }
+
+    let img = decode_image_with_hint(input, original_format)?;
     let jpeg_exif = resolve_jpeg_exif_payload(input, original_format, output_format, params)?;
 
     // Apply explicit resize constraints first
@@ -823,11 +931,9 @@ pub struct ProbeInfo {
 pub fn probe_bytes(data: &[u8]) -> Result<ProbeInfo, CompressError> {
     let format = detect_format(data)?;
 
-    // Use image crate's Reader for dimensions (reads header only)
-    let cursor = Cursor::new(data);
-    let reader = ImageReader::new(cursor)
-        .with_guessed_format()
-        .map_err(|e| CompressError::DecodeError(format!("Failed to read header: {e}")))?;
+    let format_hint = input_format_hint(data)
+        .ok_or_else(|| CompressError::DecodeError("Failed to detect image header".into()))?;
+    let reader = ImageReader::with_format(Cursor::new(data), format_hint);
 
     let (width, height) = reader
         .into_dimensions()
@@ -972,11 +1078,7 @@ pub fn benchmark_bytes(
     params: &CompressParams,
 ) -> Result<BenchmarkInfo, CompressError> {
     let format = detect_format(data)?;
-    let img = if format == DetectedFormat::Jpeg && is_native_jpeg(data) {
-        decode_jpeg_fast(data)?
-    } else {
-        image::load_from_memory(data).map_err(|e| CompressError::DecodeError(e.to_string()))?
-    };
+    let img = decode_image_with_hint(data, format)?;
 
     // Apply resize constraints so benchmark matches real output
     let img = apply_resize_constraints(&img, params.max_width, params.max_height);

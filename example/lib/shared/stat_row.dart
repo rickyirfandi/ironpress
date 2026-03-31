@@ -26,10 +26,7 @@ class StatRow extends StatelessWidget {
           ],
           Flexible(
             flex: 3,
-            child: Text(
-              label,
-              style: theme.textTheme.bodyMedium,
-            ),
+            child: Text(label, style: theme.textTheme.bodyMedium),
           ),
           const SizedBox(width: 12),
           Flexible(

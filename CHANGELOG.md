@@ -1,3 +1,49 @@
+## 0.2.0
+
+### Performance
+
+- **Targeted isolate offload** — single-item APIs use per-call `Isolate.run()` for failure isolation, while batch work uses an ephemeral event-driven isolate with `TransferableTypedData` to keep cross-isolate overhead low
+- **Direct PNG optimization** — PNG-to-PNG compression without resize now skips the full decode/re-encode cycle and goes straight through oxipng, significantly faster for lossless workflows
+- **Format-hinted decoding** — image decoding uses explicit format hints instead of `with_guessed_format()`, removing a redundant header scan on every call
+- **Zero-copy batch input** — Rust batch path uses `Cow<[u8]>` for memory-buffer inputs, avoiding a needless copy
+- **`TransferableTypedData`** — cross-isolate data transfer avoids copying bytes through the message port
+- **Smarter thread allocation** — Rayon thread count is capped to the batch size, preventing over-allocation for small batches
+- **Keyed thread pool cache** — Rust thread pools are cached by requested thread count instead of a single static pool, so different `threadCount` values reuse their own pool without rebuilding OS threads
+
+### Bug fixes
+
+- **`ImageFormat.fromValue` no longer silently defaults to JPEG** — unknown native format values now throw `StateError` instead of returning a wrong format, preventing subtle data corruption
+- **Batch cancellation reworked** — cancellation now propagates reliably from Dart through the worker isolate via `SendPort`, fixing a race where the native `AtomicU32` progress pointer could be freed while still in use
+- **`probe_bytes` header detection fixed** — uses `ImageReader::with_format` with an explicit format hint instead of `with_guessed_format`, which could fail on certain PNG and WebP variants
+
+### Robustness
+
+- **Input validation hardened** — `maxWidth`, `maxHeight`, `maxFileSize`, `threadCount`, `chunkSize`, and `png.optimizationLevel` are now validated before crossing the FFI boundary, with clear `ArgumentError` messages including the parameter name and allowed range
+- **Native uint32 overflow protection** — all numeric parameters are checked against the `u32` ceiling before being passed to native code
+- **Batch pre-cancellation check** — `compressBatch` returns empty results immediately if the token is already cancelled
+- **APNG detection** — PNG files containing `acTL` chunks (animated PNG) are routed through the full decode path instead of direct oxipng optimization, which would silently drop animation frames
+
+### Native loader
+
+- **Multi-candidate library loading** — desktop platforms now probe multiple locations (bundled name, repo `libs/` directories up to 3 parent levels) before failing, with clear per-candidate error messages showing exactly which paths were tried and why each failed
+
+### Breaking changes
+
+- `ImageFormat.fromValue` throws `StateError` on unknown values instead of returning `ImageFormat.jpeg`
+- `BatchCompressResult.elapsedMs` is now measured on the Dart side for the full batch operation, not inside Rust (excludes FFI overhead was misleading for chunked batches)
+- `CancellationToken.addListener` is a new public method (non-breaking for consumers, but notable for subclasses)
+
+### Tests
+
+- Batch event-order regression test
+- Batch contract tests: monotonic progress, cancellation with/without progress, mixed success/failure, output paths
+- Benchmark integration tests for `benchmarkBytes` and `benchmarkFile`
+- `keepMetadata` round-trip test (preserve EXIF for JPEG, drop for PNG)
+- Numeric argument validation tests for all boundary conditions
+- `CancellationToken` listener and disposer tests
+
+---
+
 ## 0.1.0
 
 **Initial release.**

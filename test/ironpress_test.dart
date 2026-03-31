@@ -3,51 +3,163 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironpress/ironpress.dart';
 
+Future<void> _expectNoArgumentError(Future<Object?> Function() action) async {
+  try {
+    await action();
+  } on ArgumentError catch (error, stackTrace) {
+    fail('Unexpected ArgumentError: $error\n$stackTrace');
+  } catch (_) {
+    // Any later native or loader failure is fine for validation-only tests.
+  }
+}
+
 void main() {
   group('Input validation', () {
-    test('compressFile throws on empty path', () async {
+    test('compressFile throws on empty path', () {
       expect(() => Ironpress.compressFile(''), throwsA(isA<ArgumentError>()));
     });
 
-    test('compressFileToFile throws on empty inputPath', () async {
+    test('compressFileToFile throws on empty inputPath', () {
       expect(
         () => Ironpress.compressFileToFile('', '/out.jpg'),
         throwsA(isA<ArgumentError>()),
       );
     });
 
-    test('compressFileToFile throws on empty outputPath', () async {
+    test('compressFileToFile throws on empty outputPath', () {
       expect(
         () => Ironpress.compressFileToFile('/in.jpg', ''),
         throwsA(isA<ArgumentError>()),
       );
     });
 
-    test('compressBytes throws on empty data', () async {
+    test('compressBytes throws on empty data', () {
       expect(
         () => Ironpress.compressBytes(Uint8List(0)),
         throwsA(isA<ArgumentError>()),
       );
     });
 
-    test('probeFile throws on empty path', () async {
+    test('probeFile throws on empty path', () {
       expect(() => Ironpress.probeFile(''), throwsA(isA<ArgumentError>()));
     });
 
-    test('probeBytes throws on empty data', () async {
+    test('probeBytes throws on empty data', () {
       expect(
         () => Ironpress.probeBytes(Uint8List(0)),
         throwsA(isA<ArgumentError>()),
       );
     });
 
-    test('benchmarkFile throws on empty path', () async {
+    test('benchmarkFile throws on empty path', () {
       expect(() => Ironpress.benchmarkFile(''), throwsA(isA<ArgumentError>()));
     });
 
-    test('benchmarkBytes throws on empty data', () async {
+    test('benchmarkBytes throws on empty data', () {
       expect(
         () => Ironpress.benchmarkBytes(Uint8List(0)),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+  });
+
+  group('Numeric argument validation', () {
+    test('compressBatch throws on negative threadCount', () {
+      expect(
+        () => Ironpress.compressBatch([
+          CompressInput(data: Uint8List(1)),
+        ], threadCount: -1),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('compressBatch throws on zero chunkSize', () {
+      expect(
+        () => Ironpress.compressBatch([
+          CompressInput(data: Uint8List(1)),
+        ], chunkSize: 0),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('compressBatch throws on negative chunkSize', () {
+      expect(
+        () => Ironpress.compressBatch([
+          CompressInput(data: Uint8List(1)),
+        ], chunkSize: -1),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('compressBytes throws on zero maxWidth before native call', () {
+      expect(
+        () => Ironpress.compressBytes(Uint8List(1), maxWidth: 0),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('compressFile throws on negative maxWidth before native call', () {
+      expect(
+        () => Ironpress.compressFile('/missing.jpg', maxWidth: -1),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('compressBytes throws on zero maxHeight before native call', () {
+      expect(
+        () => Ironpress.compressBytes(Uint8List(1), maxHeight: 0),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('compressFile throws on negative maxHeight before native call', () {
+      expect(
+        () => Ironpress.compressFile('/missing.jpg', maxHeight: -1),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('compressBytes throws on zero maxFileSize before native call', () {
+      expect(
+        () => Ironpress.compressBytes(Uint8List(1), maxFileSize: 0),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('compressFile throws on negative maxFileSize before native call', () {
+      expect(
+        () => Ironpress.compressFile('/missing.jpg', maxFileSize: -1),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('compressBytes throws on values larger than native u32', () {
+      expect(
+        () => Ironpress.compressBytes(Uint8List(1), maxWidth: 0x100000000),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('benchmarkFile validates resize arguments before native call', () {
+      expect(
+        () => Ironpress.benchmarkFile('/missing.jpg', maxWidth: 0),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('benchmarkBytes validates resize arguments before native call', () {
+      expect(
+        () => Ironpress.benchmarkBytes(Uint8List(1), maxHeight: -1),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('compressBytes validates png optimization before native call', () {
+      expect(
+        () => Ironpress.compressBytes(
+          Uint8List(1),
+          png: const PngOptions(optimizationLevel: 7),
+        ),
         throwsA(isA<ArgumentError>()),
       );
     });
@@ -92,15 +204,11 @@ void main() {
     });
 
     test('compressFile accepts boundary values 0 and 100', () async {
-      // Should not throw ArgumentError — just needs to pass validation.
-      // May throw CompressException (file not found) which is fine.
-      await expectLater(
+      await _expectNoArgumentError(
         () => Ironpress.compressFile('/photo.jpg', quality: 0),
-        isNot(throwsA(isA<ArgumentError>())),
       );
-      await expectLater(
+      await _expectNoArgumentError(
         () => Ironpress.compressFile('/photo.jpg', quality: 100),
-        isNot(throwsA(isA<ArgumentError>())),
       );
     });
   });

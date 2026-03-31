@@ -69,6 +69,7 @@ final class NativeBatchResult extends Struct {
   external int count;
   @Uint64()
   external int elapsedMs;
+  // Reserved for ABI compatibility with prebuilt native libraries.
   external Pointer<Uint32> completed;
 }
 

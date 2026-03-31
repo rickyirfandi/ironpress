@@ -124,10 +124,7 @@ class BatchBenchmarkResult {
 }
 
 class _SingleRunSample {
-  const _SingleRunSample({
-    required this.elapsedMs,
-    required this.outputBytes,
-  });
+  const _SingleRunSample({required this.elapsedMs, required this.outputBytes});
 
   final double elapsedMs;
   final int outputBytes;
@@ -419,7 +416,8 @@ Future<ComparisonBenchmarkResult> runCompressionBenchmark(
   final availableAdapters =
       adapters.where((adapter) => adapter.unsupportedReason() == null).toList();
   final totalSteps =
-      availableAdapters.length * (2 + config.singleRuns + 2 + config.batchRuns) +
+      availableAdapters.length *
+          (2 + config.singleRuns + 2 + config.batchRuns) +
       1;
   var completedSteps = 0;
 
@@ -517,7 +515,10 @@ Future<PackageBenchmarkResult> _runAdapterBenchmark(
     final batchSamples = <_BatchRunSample>[];
     for (var i = 0; i < config.batchRuns; i++) {
       final watch = Stopwatch()..start();
-      final output = await adapter.compressBatch(batchInputs, quality: config.quality);
+      final output = await adapter.compressBatch(
+        batchInputs,
+        quality: config.quality,
+      );
       watch.stop();
       batchSamples.add(
         _BatchRunSample(
@@ -535,22 +536,31 @@ Future<PackageBenchmarkResult> _runAdapterBenchmark(
       subtitle: adapter.subtitle,
       usesNativeBatch: adapter.usesNativeBatch,
       single: SingleBenchmarkResult(
-        outputBytes: _medianInt(singleSamples.map((sample) => sample.outputBytes)),
-        medianElapsedMs:
-            _medianDouble(singleSamples.map((sample) => sample.elapsedMs)),
-        sampleElapsedMs:
-            singleSamples.map((sample) => sample.elapsedMs).toList(growable: false),
+        outputBytes: _medianInt(
+          singleSamples.map((sample) => sample.outputBytes),
+        ),
+        medianElapsedMs: _medianDouble(
+          singleSamples.map((sample) => sample.elapsedMs),
+        ),
+        sampleElapsedMs: singleSamples
+            .map((sample) => sample.elapsedMs)
+            .toList(growable: false),
       ),
       batch: BatchBenchmarkResult(
         totalInputBytes: totalInputBytes,
-        totalOutputBytes:
-            _medianInt(batchSamples.map((sample) => sample.totalOutputBytes)),
-        successCount: _medianInt(batchSamples.map((sample) => sample.successCount)),
+        totalOutputBytes: _medianInt(
+          batchSamples.map((sample) => sample.totalOutputBytes),
+        ),
+        successCount: _medianInt(
+          batchSamples.map((sample) => sample.successCount),
+        ),
         batchCount: config.batchCount,
-        medianElapsedMs:
-            _medianDouble(batchSamples.map((sample) => sample.elapsedMs)),
-        sampleElapsedMs:
-            batchSamples.map((sample) => sample.elapsedMs).toList(growable: false),
+        medianElapsedMs: _medianDouble(
+          batchSamples.map((sample) => sample.elapsedMs),
+        ),
+        sampleElapsedMs: batchSamples
+            .map((sample) => sample.elapsedMs)
+            .toList(growable: false),
       ),
     );
   } on UnsupportedError catch (error) {

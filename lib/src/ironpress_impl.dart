@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -14,6 +15,11 @@ const int _expectedAbiVersion = 1;
 
 /// Error code used when the batch progress isolate crashes unexpectedly.
 const int _isolateCrashCode = -100;
+
+/// Maximum value representable by native `u32` fields.
+const int _maxUint32 = 0xFFFFFFFF;
+
+const String _cancelBatchMessage = 'cancel';
 
 /// Validates quality parameters before passing them to the native engine.
 ///
@@ -34,10 +40,277 @@ void _validateQuality({int? quality, int? minQuality}) {
   }
 }
 
+void _validateOptionalPositiveUint32(int? value, String name) {
+  if (value == null) {
+    return;
+  }
+  if (value <= 0) {
+    throw ArgumentError.value(value, name, 'must be greater than 0');
+  }
+  if (value > _maxUint32) {
+    throw ArgumentError.value(
+      value,
+      name,
+      'must be less than or equal to $_maxUint32',
+    );
+  }
+}
+
+void _validateNonNegativeUint32(int value, String name) {
+  if (value < 0) {
+    throw ArgumentError.value(
+      value,
+      name,
+      'must be greater than or equal to 0',
+    );
+  }
+  if (value > _maxUint32) {
+    throw ArgumentError.value(
+      value,
+      name,
+      'must be less than or equal to $_maxUint32',
+    );
+  }
+}
+
+void _validatePositiveUint32(int value, String name) {
+  if (value <= 0) {
+    throw ArgumentError.value(value, name, 'must be greater than 0');
+  }
+  if (value > _maxUint32) {
+    throw ArgumentError.value(
+      value,
+      name,
+      'must be less than or equal to $_maxUint32',
+    );
+  }
+}
+
+void _validateResizeAndSizeParams({
+  int? maxWidth,
+  int? maxHeight,
+  int? maxFileSize,
+}) {
+  _validateOptionalPositiveUint32(maxWidth, 'maxWidth');
+  _validateOptionalPositiveUint32(maxHeight, 'maxHeight');
+  _validateOptionalPositiveUint32(maxFileSize, 'maxFileSize');
+}
+
+void _validatePngOptions(PngOptions png) {
+  final optimizationLevel = png.optimizationLevel;
+  if (optimizationLevel < 0 || optimizationLevel > 6) {
+    throw ArgumentError.value(
+      optimizationLevel,
+      'png.optimizationLevel',
+      'must be in the range 0-6',
+    );
+  }
+}
+
+void _validateCompressionArgs({
+  int? quality,
+  int? maxWidth,
+  int? maxHeight,
+  int? maxFileSize,
+  int? minQuality,
+  required PngOptions png,
+}) {
+  _validateQuality(quality: quality, minQuality: minQuality);
+  _validateResizeAndSizeParams(
+    maxWidth: maxWidth,
+    maxHeight: maxHeight,
+    maxFileSize: maxFileSize,
+  );
+  _validatePngOptions(png);
+}
+
+void _validateBatchArgs({required int threadCount, required int chunkSize}) {
+  _validateNonNegativeUint32(threadCount, 'threadCount');
+  _validatePositiveUint32(chunkSize, 'chunkSize');
+}
+
+void _validateBenchmarkArgs({int? maxWidth, int? maxHeight}) {
+  _validateOptionalPositiveUint32(maxWidth, 'maxWidth');
+  _validateOptionalPositiveUint32(maxHeight, 'maxHeight');
+}
+
 /// Cached bindings per isolate (each isolate has its own top-level state).
 NativeBindings? _cachedBindings;
 NativeBindings _getBindings() =>
     _cachedBindings ??= NativeBindings.fromLibrary(loadNativeLibrary());
+
+class _WorkerFailure {
+  const _WorkerFailure({required this.message, this.code, this.stackTrace});
+
+  final String message;
+  final int? code;
+  final String? stackTrace;
+
+  Object toException() {
+    if (code != null) {
+      return CompressException(code!, message);
+    }
+    final suffix =
+        stackTrace == null || stackTrace!.isEmpty ? '' : '\n$stackTrace';
+    return StateError('$message$suffix');
+  }
+
+  Never rethrowAsException() {
+    throw toException();
+  }
+}
+
+class _BatchIsolateRequest {
+  const _BatchIsolateRequest({
+    required this.batchInputs,
+    required this.eventPort,
+    required this.quality,
+    required this.maxWidth,
+    required this.maxHeight,
+    required this.maxFileSize,
+    required this.minQuality,
+    required this.allowResize,
+    required this.format,
+    required this.keepMetadata,
+    required this.jpeg,
+    required this.png,
+    required this.threadCount,
+    required this.chunkSize,
+    required this.reportProgress,
+    required this.enableCancellation,
+  });
+
+  final List<_TransferableBatchInputSpec> batchInputs;
+  final SendPort eventPort;
+  final int quality;
+  final int? maxWidth;
+  final int? maxHeight;
+  final int? maxFileSize;
+  final int minQuality;
+  final bool allowResize;
+  final CompressFormat format;
+  final bool keepMetadata;
+  final JpegOptions jpeg;
+  final PngOptions png;
+  final int threadCount;
+  final int chunkSize;
+  final bool reportProgress;
+  final bool enableCancellation;
+}
+
+Future<void> _batchWorkerMain(_BatchIsolateRequest request) async {
+  try {
+    final result = await Ironpress._compressBatchTransferAsync(
+      request.batchInputs
+          .map((input) => input.materialize())
+          .toList(growable: false),
+      quality: request.quality,
+      maxWidth: request.maxWidth,
+      maxHeight: request.maxHeight,
+      maxFileSize: request.maxFileSize,
+      minQuality: request.minQuality,
+      allowResize: request.allowResize,
+      format: request.format,
+      keepMetadata: request.keepMetadata,
+      jpeg: request.jpeg,
+      png: request.png,
+      threadCount: request.threadCount,
+      chunkSize: request.chunkSize,
+      progressSendPort: request.reportProgress ? request.eventPort : null,
+      controlInitPort: request.enableCancellation ? request.eventPort : null,
+    );
+    request.eventPort.send(result);
+  } on CompressException catch (error, stackTrace) {
+    request.eventPort.send(
+      _WorkerFailure(
+        message: error.message,
+        code: error.code,
+        stackTrace: stackTrace.toString(),
+      ),
+    );
+  } catch (error, stackTrace) {
+    request.eventPort.send(
+      _WorkerFailure(
+        message: error.toString(),
+        stackTrace: stackTrace.toString(),
+      ),
+    );
+  }
+}
+
+class _TransferableBatchInputSpec {
+  const _TransferableBatchInputSpec({this.path, this.data, this.outputPath});
+
+  final String? path;
+  final TransferableTypedData? data;
+  final String? outputPath;
+
+  _BatchInputSpec materialize() {
+    return _BatchInputSpec(
+      path: path,
+      data: data?.materialize().asUint8List(),
+      outputPath: outputPath,
+    );
+  }
+}
+
+class _TransferableCompressResult {
+  const _TransferableCompressResult({
+    this.data,
+    required this.originalSize,
+    required this.compressedSize,
+    required this.width,
+    required this.height,
+    required this.qualityUsed,
+    required this.iterations,
+    required this.resizedToFit,
+    this.errorCode,
+    this.errorMessage,
+  });
+
+  final TransferableTypedData? data;
+  final int originalSize;
+  final int compressedSize;
+  final int width;
+  final int height;
+  final int qualityUsed;
+  final int iterations;
+  final bool resizedToFit;
+  final int? errorCode;
+  final String? errorMessage;
+
+  CompressResult materialize() {
+    return CompressResult(
+      data: data?.materialize().asUint8List(),
+      originalSize: originalSize,
+      compressedSize: compressedSize,
+      width: width,
+      height: height,
+      qualityUsed: qualityUsed,
+      iterations: iterations,
+      resizedToFit: resizedToFit,
+      errorCode: errorCode,
+      errorMessage: errorMessage,
+    );
+  }
+}
+
+class _TransferableBatchCompressResult {
+  const _TransferableBatchCompressResult({
+    required this.results,
+    required this.elapsedMs,
+  });
+
+  final List<_TransferableCompressResult> results;
+  final int elapsedMs;
+
+  BatchCompressResult materialize() {
+    return BatchCompressResult(
+      results: results.map((result) => result.materialize()).toList(),
+      elapsedMs: elapsedMs,
+    );
+  }
+}
 
 /// High-performance image compression powered by Rust.
 ///
@@ -150,13 +423,20 @@ class Ironpress {
     if (path.isEmpty) {
       throw ArgumentError.value(path, 'path', 'must not be empty');
     }
-    _validateQuality(quality: quality, minQuality: minQuality);
+    _validateCompressionArgs(
+      quality: quality,
+      maxWidth: maxWidth,
+      maxHeight: maxHeight,
+      maxFileSize: maxFileSize,
+      minQuality: minQuality,
+      png: png,
+    );
     final effectiveQuality = quality ?? preset?.quality ?? 80;
     final effectiveMaxWidth = maxWidth ?? preset?.maxWidth;
     final effectiveMaxHeight = maxHeight ?? preset?.maxHeight;
     final effectiveMinQuality = minQuality ?? preset?.minQuality ?? 30;
-    return Isolate.run(() {
-      return _compressFileSync(
+    final result = await Isolate.run(() {
+      return _compressFileTransferSync(
         path,
         quality: effectiveQuality,
         maxWidth: effectiveMaxWidth,
@@ -170,6 +450,7 @@ class Ironpress {
         png: png,
       );
     });
+    return result.materialize();
   }
 
   /// Compress an image file and write the result to [outputPath].
@@ -211,13 +492,20 @@ class Ironpress {
     if (outputPath.isEmpty) {
       throw ArgumentError.value(outputPath, 'outputPath', 'must not be empty');
     }
-    _validateQuality(quality: quality, minQuality: minQuality);
+    _validateCompressionArgs(
+      quality: quality,
+      maxWidth: maxWidth,
+      maxHeight: maxHeight,
+      maxFileSize: maxFileSize,
+      minQuality: minQuality,
+      png: png,
+    );
     final effectiveQuality = quality ?? preset?.quality ?? 80;
     final effectiveMaxWidth = maxWidth ?? preset?.maxWidth;
     final effectiveMaxHeight = maxHeight ?? preset?.maxHeight;
     final effectiveMinQuality = minQuality ?? preset?.minQuality ?? 30;
-    return Isolate.run(() {
-      return _compressFileToFileSync(
+    final result = await Isolate.run(() {
+      return _compressFileToFileTransferSync(
         inputPath,
         outputPath,
         quality: effectiveQuality,
@@ -232,6 +520,7 @@ class Ironpress {
         png: png,
       );
     });
+    return result.materialize();
   }
 
   /// Compress raw image bytes in memory and return the result as bytes.
@@ -275,14 +564,22 @@ class Ironpress {
     if (data.isEmpty) {
       throw ArgumentError.value(data, 'data', 'must not be empty');
     }
-    _validateQuality(quality: quality, minQuality: minQuality);
+    _validateCompressionArgs(
+      quality: quality,
+      maxWidth: maxWidth,
+      maxHeight: maxHeight,
+      maxFileSize: maxFileSize,
+      minQuality: minQuality,
+      png: png,
+    );
     final effectiveQuality = quality ?? preset?.quality ?? 80;
     final effectiveMaxWidth = maxWidth ?? preset?.maxWidth;
     final effectiveMaxHeight = maxHeight ?? preset?.maxHeight;
     final effectiveMinQuality = minQuality ?? preset?.minQuality ?? 30;
-    return Isolate.run(() {
-      return _compressBytesSync(
-        data,
+    final transferData = TransferableTypedData.fromList([data]);
+    final result = await Isolate.run(() {
+      return _compressBytesTransferSync(
+        transferData.materialize().asUint8List(),
         quality: effectiveQuality,
         maxWidth: effectiveMaxWidth,
         maxHeight: effectiveMaxHeight,
@@ -295,6 +592,7 @@ class Ironpress {
         png: png,
       );
     });
+    return result.materialize();
   }
 
   /// Batch compress multiple images using Rust's rayon thread pool.
@@ -350,7 +648,15 @@ class Ironpress {
     void Function(int completed, int total)? onProgress,
     CancellationToken? cancellationToken,
   }) async {
-    _validateQuality(quality: quality, minQuality: minQuality);
+    _validateCompressionArgs(
+      quality: quality,
+      maxWidth: maxWidth,
+      maxHeight: maxHeight,
+      maxFileSize: maxFileSize,
+      minQuality: minQuality,
+      png: png,
+    );
+    _validateBatchArgs(threadCount: threadCount, chunkSize: chunkSize);
     final effectiveQuality = quality ?? preset?.quality ?? 80;
     final effectiveMaxWidth = maxWidth ?? preset?.maxWidth;
     final effectiveMaxHeight = maxHeight ?? preset?.maxHeight;
@@ -359,21 +665,33 @@ class Ironpress {
     if (total == 0) {
       return const BatchCompressResult(results: [], elapsedMs: 0);
     }
+    if (cancellationToken?.isCancelled ?? false) {
+      return const BatchCompressResult(results: [], elapsedMs: 0);
+    }
 
-    final inputSpecs =
-        inputs
-            .map(
-              (i) => _BatchInputSpec(
-                path: i.path,
-                data: i.data,
-                outputPath: i.outputPath,
-              ),
-            )
-            .toList();
+    final transferableInputs = inputs
+        .map(
+          (i) => _BatchInputSpec(
+            path: i.path,
+            data: i.data,
+            outputPath: i.outputPath,
+          ),
+        )
+        .map(
+          (input) => _TransferableBatchInputSpec(
+            path: input.path,
+            data:
+                input.data == null
+                    ? null
+                    : TransferableTypedData.fromList([input.data!]),
+            outputPath: input.outputPath,
+          ),
+        )
+        .toList(growable: false);
 
-    if (onProgress != null) {
-      return _compressBatchWithProgress(
-        inputSpecs,
+    if (onProgress != null || cancellationToken != null) {
+      return _compressBatchWithEvents(
+        transferableInputs,
         total: total,
         quality: effectiveQuality,
         maxWidth: effectiveMaxWidth,
@@ -392,9 +710,11 @@ class Ironpress {
       );
     }
 
-    return Isolate.run(() {
-      return _compressBatchSync(
-        inputSpecs,
+    final result = await Isolate.run(() {
+      return _compressBatchTransferAsync(
+        transferableInputs
+            .map((input) => input.materialize())
+            .toList(growable: false),
         quality: effectiveQuality,
         maxWidth: effectiveMaxWidth,
         maxHeight: effectiveMaxHeight,
@@ -409,108 +729,7 @@ class Ironpress {
         chunkSize: chunkSize,
       );
     });
-  }
-
-  /// Batch with progress: runs FFI on an isolate and forwards chunk progress.
-  static Future<BatchCompressResult> _compressBatchWithProgress(
-    List<_BatchInputSpec> inputSpecs, {
-    required int total,
-    required int quality,
-    int? maxWidth,
-    int? maxHeight,
-    int? maxFileSize,
-    required int minQuality,
-    required bool allowResize,
-    required CompressFormat format,
-    required bool keepMetadata,
-    required JpegOptions jpeg,
-    required PngOptions png,
-    required int threadCount,
-    required int chunkSize,
-    required void Function(int completed, int total) onProgress,
-    CancellationToken? cancellationToken,
-  }) async {
-    final progressPort = ReceivePort();
-    final resultPort = ReceivePort();
-    final errorPort = ReceivePort();
-
-    // Ports must be closed regardless of whether spawn succeeds or fails,
-    // otherwise they leak OS resources.
-    try {
-      progressPort.listen((message) {
-        if (message is int) {
-          onProgress(message, total);
-        }
-      });
-
-      await Isolate.spawn(
-        (message) {
-          final args = message as List;
-          final specs = args[0] as List<_BatchInputSpec>;
-          final progressSend = args[1] as SendPort;
-          final resultSend = args[2] as SendPort;
-          final params = args[3] as Map<String, dynamic>;
-
-          final result = _compressBatchSync(
-            specs,
-            quality: params['quality'] as int,
-            maxWidth: params['maxWidth'] as int?,
-            maxHeight: params['maxHeight'] as int?,
-            maxFileSize: params['maxFileSize'] as int?,
-            minQuality: params['minQuality'] as int,
-            allowResize: params['allowResize'] as bool,
-            format: params['format'] as CompressFormat,
-            keepMetadata: params['keepMetadata'] as bool,
-            jpeg: params['jpeg'] as JpegOptions,
-            png: params['png'] as PngOptions,
-            threadCount: params['threadCount'] as int,
-            chunkSize: params['chunkSize'] as int,
-            progressSendPort: progressSend,
-          );
-
-          resultSend.send(result);
-        },
-        [
-          inputSpecs,
-          progressPort.sendPort,
-          resultPort.sendPort,
-          {
-            'quality': quality,
-            'maxWidth': maxWidth,
-            'maxHeight': maxHeight,
-            'maxFileSize': maxFileSize,
-            'minQuality': minQuality,
-            'allowResize': allowResize,
-            'format': format,
-            'keepMetadata': keepMetadata,
-            'jpeg': jpeg,
-            'png': png,
-            'threadCount': threadCount,
-            'chunkSize': chunkSize,
-          },
-        ],
-        onError: errorPort.sendPort,
-      );
-
-      // Race result vs isolate error to avoid hanging if the isolate crashes.
-      final first = await Future.any([resultPort.first, errorPort.first]);
-
-      if (first is BatchCompressResult) {
-        onProgress(total, total);
-        return first;
-      }
-
-      // Isolate error — first is [errorMessage, stackTrace]
-      final errorInfo = first as List;
-      throw CompressException(
-        _isolateCrashCode,
-        'Batch compression isolate crashed: ${errorInfo[0]}',
-      );
-    } finally {
-      progressPort.close();
-      resultPort.close();
-      errorPort.close();
-    }
+    return result.materialize();
   }
 
   // ─── Probe: Quick Metadata ───────────────────────────────────────────
@@ -532,39 +751,156 @@ class Ironpress {
   ///   await Ironpress.compressFile(path, preset: CompressPreset.medium);
   /// }
   /// ```
+  // Internal: batch work with progress/cancellation needs one ordered event
+  // channel so progress and the terminal result cannot race each other.
+  static Future<BatchCompressResult> _compressBatchWithEvents(
+    List<_TransferableBatchInputSpec> batchInputs, {
+    required int total,
+    required int quality,
+    int? maxWidth,
+    int? maxHeight,
+    int? maxFileSize,
+    required int minQuality,
+    required bool allowResize,
+    required CompressFormat format,
+    required bool keepMetadata,
+    required JpegOptions jpeg,
+    required PngOptions png,
+    required int threadCount,
+    required int chunkSize,
+    void Function(int completed, int total)? onProgress,
+    CancellationToken? cancellationToken,
+  }) async {
+    final eventPort = ReceivePort();
+    final errorPort = ReceivePort();
+    final resultCompleter = Completer<BatchCompressResult>();
+    StreamSubscription? eventSubscription;
+    StreamSubscription? errorSubscription;
+    SendPort? cancelSendPort;
+    var cancelSignalSent = false;
+    var lastCompleted = 0;
+
+    void completeError(Object error, [StackTrace? stackTrace]) {
+      if (!resultCompleter.isCompleted) {
+        resultCompleter.completeError(error, stackTrace);
+      }
+    }
+
+    void sendCancelSignal() {
+      if (cancelSignalSent || cancelSendPort == null) {
+        return;
+      }
+      cancelSignalSent = true;
+      cancelSendPort!.send(_cancelBatchMessage);
+    }
+
+    final removeCancelListener = cancellationToken?.addListener(
+      sendCancelSignal,
+    );
+
+    try {
+      eventSubscription = eventPort.listen((message) {
+        if (message is SendPort) {
+          cancelSendPort = message;
+          if (cancellationToken?.isCancelled ?? false) {
+            sendCancelSignal();
+          }
+          return;
+        }
+
+        if (message is int) {
+          lastCompleted = message;
+          onProgress?.call(message, total);
+          return;
+        }
+
+        if (message is _TransferableBatchCompressResult) {
+          final result = message.materialize();
+          final finalCompleted = result.results.length;
+          if (onProgress != null && lastCompleted != finalCompleted) {
+            lastCompleted = finalCompleted;
+            onProgress(finalCompleted, total);
+          }
+          if (!resultCompleter.isCompleted) {
+            resultCompleter.complete(result);
+          }
+          return;
+        }
+
+        if (message is _WorkerFailure) {
+          completeError(message.toException());
+        }
+      });
+
+      errorSubscription = errorPort.listen((message) {
+        final details =
+            message is List && message.isNotEmpty
+                ? message.first.toString()
+                : 'unknown isolate error';
+        completeError(
+          CompressException(
+            _isolateCrashCode,
+            'Batch compression isolate crashed: $details',
+          ),
+        );
+      });
+
+      await Isolate.spawn<_BatchIsolateRequest>(
+        _batchWorkerMain,
+        _BatchIsolateRequest(
+          batchInputs: batchInputs,
+          eventPort: eventPort.sendPort,
+          quality: quality,
+          maxWidth: maxWidth,
+          maxHeight: maxHeight,
+          maxFileSize: maxFileSize,
+          minQuality: minQuality,
+          allowResize: allowResize,
+          format: format,
+          keepMetadata: keepMetadata,
+          jpeg: jpeg,
+          png: png,
+          threadCount: threadCount,
+          chunkSize: chunkSize,
+          reportProgress: onProgress != null,
+          enableCancellation: cancellationToken != null,
+        ),
+        onError: errorPort.sendPort,
+        errorsAreFatal: true,
+      );
+
+      return await resultCompleter.future;
+    } finally {
+      removeCancelListener?.call();
+      await eventSubscription?.cancel();
+      await errorSubscription?.cancel();
+      eventPort.close();
+      errorPort.close();
+    }
+  }
+
+  /// Read image metadata from a file without decoding pixel data.
+  ///
+  /// Much faster than compression â€” useful for validating images before
+  /// upload or checking resolution before deciding whether to resize.
+  ///
+  /// Throws [ArgumentError] if [path] is empty.
+  /// Throws [CompressException] if the file cannot be read or parsed.
+  ///
+  /// ```dart
+  /// final info = await Ironpress.probeFile('/path/to/photo.jpg');
+  /// print(info); // ImageProbe(4000x3000, JPEG, 4.2 MB, 12.0MP, EXIF)
+  ///
+  /// if (info.megapixels > 12) {
+  ///   // Only compress if large enough to benefit
+  ///   await Ironpress.compressFile(path, preset: CompressPreset.medium);
+  /// }
+  /// ```
   static Future<ImageProbe> probeFile(String path) async {
     if (path.isEmpty) {
       throw ArgumentError.value(path, 'path', 'must not be empty');
     }
-    return Isolate.run(() {
-      final bindings = _getBindings();
-      final pathPtr = path.toNativeUtf8();
-      final outPtr = calloc<NativeProbeResult>();
-
-      try {
-        bindings.probeFile(pathPtr, outPtr);
-
-        if (outPtr.ref.errorCode != 0) {
-          final msg =
-              outPtr.ref.errorMessage != nullptr
-                  ? outPtr.ref.errorMessage.toDartString()
-                  : 'Probe failed (code ${outPtr.ref.errorCode})';
-          throw CompressException(outPtr.ref.errorCode, msg);
-        }
-
-        return ImageProbe(
-          width: outPtr.ref.width,
-          height: outPtr.ref.height,
-          format: ImageFormat.fromValue(outPtr.ref.format),
-          fileSize: outPtr.ref.fileSize,
-          hasExif: outPtr.ref.hasExif != 0,
-        );
-      } finally {
-        bindings.freeProbeResult(outPtr);
-        calloc.free(outPtr);
-        calloc.free(pathPtr);
-      }
-    });
+    return Isolate.run(() => _probeFileSync(path));
   }
 
   /// Deprecated. Use [probeFile] instead.
@@ -579,36 +915,10 @@ class Ironpress {
     if (data.isEmpty) {
       throw ArgumentError.value(data, 'data', 'must not be empty');
     }
-    return Isolate.run(() {
-      final bindings = _getBindings();
-      final nativeData = calloc<Uint8>(data.length);
-      nativeData.asTypedList(data.length).setAll(0, data);
-      final outPtr = calloc<NativeProbeResult>();
-
-      try {
-        bindings.probeBuffer(nativeData, data.length, outPtr);
-
-        if (outPtr.ref.errorCode != 0) {
-          final msg =
-              outPtr.ref.errorMessage != nullptr
-                  ? outPtr.ref.errorMessage.toDartString()
-                  : 'Probe failed (code ${outPtr.ref.errorCode})';
-          throw CompressException(outPtr.ref.errorCode, msg);
-        }
-
-        return ImageProbe(
-          width: outPtr.ref.width,
-          height: outPtr.ref.height,
-          format: ImageFormat.fromValue(outPtr.ref.format),
-          fileSize: outPtr.ref.fileSize,
-          hasExif: outPtr.ref.hasExif != 0,
-        );
-      } finally {
-        bindings.freeProbeResult(outPtr);
-        calloc.free(outPtr);
-        calloc.free(nativeData);
-      }
-    });
+    final transferData = TransferableTypedData.fromList([data]);
+    return Isolate.run(
+      () => _probeBytesSync(transferData.materialize().asUint8List()),
+    );
   }
 
   // ─── Benchmark: Quality Sweep ────────────────────────────────────────
@@ -641,9 +951,10 @@ class Ironpress {
     if (path.isEmpty) {
       throw ArgumentError.value(path, 'path', 'must not be empty');
     }
-    return Isolate.run(() {
-      return _benchmarkFileSync(path, maxWidth: maxWidth, maxHeight: maxHeight);
-    });
+    _validateBenchmarkArgs(maxWidth: maxWidth, maxHeight: maxHeight);
+    return Isolate.run(
+      () => _benchmarkFileSync(path, maxWidth: maxWidth, maxHeight: maxHeight),
+    );
   }
 
   /// Deprecated. Use [benchmarkFile] instead.
@@ -665,13 +976,15 @@ class Ironpress {
     if (data.isEmpty) {
       throw ArgumentError.value(data, 'data', 'must not be empty');
     }
-    return Isolate.run(() {
-      return _benchmarkBytesSync(
-        data,
+    _validateBenchmarkArgs(maxWidth: maxWidth, maxHeight: maxHeight);
+    final transferData = TransferableTypedData.fromList([data]);
+    return Isolate.run(
+      () => _benchmarkBytesSync(
+        transferData.materialize().asUint8List(),
         maxWidth: maxWidth,
         maxHeight: maxHeight,
-      );
-    });
+      ),
+    );
   }
 
   /// Return the native library version string.
@@ -682,7 +995,13 @@ class Ironpress {
 
   // ─── Internal: Sync FFI calls (run on isolates) ──────────────────────
 
-  static CompressResult _compressFileSync(
+  static Pointer<Uint8> _copyBytesToNative(Uint8List data) {
+    final nativeData = malloc<Uint8>(data.length);
+    nativeData.asTypedList(data.length).setAll(0, data);
+    return nativeData;
+  }
+
+  static _TransferableCompressResult _compressFileTransferSync(
     String path, {
     required int quality,
     int? maxWidth,
@@ -695,7 +1014,7 @@ class Ironpress {
     required JpegOptions jpeg,
     required PngOptions png,
   }) {
-    final bindings = _getBindings();
+    final bindings = Ironpress._b;
     final pathPtr = path.toNativeUtf8();
     final paramsPtr = _buildParams(
       quality: quality,
@@ -709,18 +1028,18 @@ class Ironpress {
       jpeg: jpeg,
       png: png,
     );
-    final outPtr = calloc<NativeCompressResult>();
+    final outPtr = malloc<NativeCompressResult>();
 
     try {
       bindings.compressFile(pathPtr, paramsPtr, outPtr);
-      return _convertResult(outPtr, bindings);
+      return _convertResultTransfer(outPtr, bindings);
     } finally {
       calloc.free(pathPtr);
       calloc.free(paramsPtr);
     }
   }
 
-  static CompressResult _compressFileToFileSync(
+  static _TransferableCompressResult _compressFileToFileTransferSync(
     String inputPath,
     String outputPath, {
     required int quality,
@@ -734,9 +1053,9 @@ class Ironpress {
     required JpegOptions jpeg,
     required PngOptions png,
   }) {
-    final bindings = _getBindings();
-    final inPtr = inputPath.toNativeUtf8();
-    final outPathPtr = outputPath.toNativeUtf8();
+    final bindings = Ironpress._b;
+    final inputPtr = inputPath.toNativeUtf8();
+    final outputPtr = outputPath.toNativeUtf8();
     final paramsPtr = _buildParams(
       quality: quality,
       maxWidth: maxWidth,
@@ -749,19 +1068,19 @@ class Ironpress {
       jpeg: jpeg,
       png: png,
     );
-    final outPtr = calloc<NativeCompressResult>();
+    final outPtr = malloc<NativeCompressResult>();
 
     try {
-      bindings.compressFileToFile(inPtr, outPathPtr, paramsPtr, outPtr);
-      return _convertResult(outPtr, bindings);
+      bindings.compressFileToFile(inputPtr, outputPtr, paramsPtr, outPtr);
+      return _convertResultTransfer(outPtr, bindings);
     } finally {
-      calloc.free(inPtr);
-      calloc.free(outPathPtr);
+      calloc.free(inputPtr);
+      calloc.free(outputPtr);
       calloc.free(paramsPtr);
     }
   }
 
-  static CompressResult _compressBytesSync(
+  static _TransferableCompressResult _compressBytesTransferSync(
     Uint8List data, {
     required int quality,
     int? maxWidth,
@@ -774,9 +1093,8 @@ class Ironpress {
     required JpegOptions jpeg,
     required PngOptions png,
   }) {
-    final bindings = _getBindings();
-    final nativeData = calloc<Uint8>(data.length);
-    nativeData.asTypedList(data.length).setAll(0, data);
+    final bindings = Ironpress._b;
+    final nativeData = _copyBytesToNative(data);
     final paramsPtr = _buildParams(
       quality: quality,
       maxWidth: maxWidth,
@@ -789,14 +1107,40 @@ class Ironpress {
       jpeg: jpeg,
       png: png,
     );
-    final outPtr = calloc<NativeCompressResult>();
+    final outPtr = malloc<NativeCompressResult>();
 
     try {
       bindings.compressBuffer(nativeData, data.length, paramsPtr, outPtr);
-      return _convertResult(outPtr, bindings);
+      return _convertResultTransfer(outPtr, bindings);
     } finally {
-      calloc.free(nativeData);
+      malloc.free(nativeData);
       calloc.free(paramsPtr);
+    }
+  }
+
+  static ImageProbe _probeFileSync(String path) {
+    final bindings = Ironpress._b;
+    final pathPtr = path.toNativeUtf8();
+    final outPtr = malloc<NativeProbeResult>();
+
+    try {
+      bindings.probeFile(pathPtr, outPtr);
+      return _convertProbeResult(outPtr, bindings);
+    } finally {
+      calloc.free(pathPtr);
+    }
+  }
+
+  static ImageProbe _probeBytesSync(Uint8List data) {
+    final bindings = Ironpress._b;
+    final nativeData = _copyBytesToNative(data);
+    final outPtr = malloc<NativeProbeResult>();
+
+    try {
+      bindings.probeBuffer(nativeData, data.length, outPtr);
+      return _convertProbeResult(outPtr, bindings);
+    } finally {
+      malloc.free(nativeData);
     }
   }
 
@@ -807,7 +1151,7 @@ class Ironpress {
     int? maxWidth,
     int? maxHeight,
   }) {
-    final bindings = _getBindings();
+    final bindings = Ironpress._b;
     final pathPtr = path.toNativeUtf8();
     final paramsPtr = _buildParams(
       quality: 80,
@@ -820,7 +1164,7 @@ class Ironpress {
       minQuality: 30,
       allowResize: true,
     );
-    final outPtr = calloc<NativeBenchmarkResult>();
+    final outPtr = malloc<NativeBenchmarkResult>();
 
     try {
       bindings.benchmarkFile(pathPtr, paramsPtr, outPtr);
@@ -836,9 +1180,8 @@ class Ironpress {
     int? maxWidth,
     int? maxHeight,
   }) {
-    final bindings = _getBindings();
-    final nativeData = calloc<Uint8>(data.length);
-    nativeData.asTypedList(data.length).setAll(0, data);
+    final bindings = Ironpress._b;
+    final nativeData = _copyBytesToNative(data);
     final paramsPtr = _buildParams(
       quality: 80,
       maxWidth: maxWidth,
@@ -850,13 +1193,13 @@ class Ironpress {
       minQuality: 30,
       allowResize: true,
     );
-    final outPtr = calloc<NativeBenchmarkResult>();
+    final outPtr = malloc<NativeBenchmarkResult>();
 
     try {
       bindings.benchmarkBuffer(nativeData, data.length, paramsPtr, outPtr);
       return _convertBenchmarkResult(outPtr, bindings);
     } finally {
-      calloc.free(nativeData);
+      malloc.free(nativeData);
       calloc.free(paramsPtr);
     }
   }
@@ -891,9 +1234,7 @@ class Ironpress {
     return p;
   }
 
-  /// Convert a native CompressResult (written via output pointer) to Dart.
-  /// Frees the native inner allocations and the output pointer.
-  static CompressResult _convertResult(
+  static _TransferableCompressResult _convertResultTransfer(
     Pointer<NativeCompressResult> outPtr,
     NativeBindings bindings,
   ) {
@@ -908,19 +1249,17 @@ class Ironpress {
         throw CompressException(ref.errorCode, msg);
       }
 
-      Uint8List? dartData;
-      final compressedSize = ref.dataLen;
-
+      TransferableTypedData? transferData;
       if (ref.data != nullptr && ref.dataLen > 0) {
-        dartData = Uint8List.fromList(
+        transferData = TransferableTypedData.fromList([
           ref.data.cast<Uint8>().asTypedList(ref.dataLen),
-        );
+        ]);
       }
 
-      return CompressResult(
-        data: dartData,
+      return _TransferableCompressResult(
+        data: transferData,
         originalSize: ref.originalSize,
-        compressedSize: compressedSize,
+        compressedSize: ref.dataLen,
         width: ref.width,
         height: ref.height,
         qualityUsed: ref.qualityUsed,
@@ -929,7 +1268,35 @@ class Ironpress {
       );
     } finally {
       bindings.freeCompressResult(outPtr);
-      calloc.free(outPtr);
+      malloc.free(outPtr);
+    }
+  }
+
+  static ImageProbe _convertProbeResult(
+    Pointer<NativeProbeResult> outPtr,
+    NativeBindings bindings,
+  ) {
+    try {
+      final ref = outPtr.ref;
+
+      if (ref.errorCode != 0) {
+        final msg =
+            ref.errorMessage != nullptr
+                ? ref.errorMessage.toDartString()
+                : 'Probe failed (code ${ref.errorCode})';
+        throw CompressException(ref.errorCode, msg);
+      }
+
+      return ImageProbe(
+        width: ref.width,
+        height: ref.height,
+        format: ImageFormat.fromValue(ref.format),
+        fileSize: ref.fileSize,
+        hasExif: ref.hasExif != 0,
+      );
+    } finally {
+      bindings.freeProbeResult(outPtr);
+      malloc.free(outPtr);
     }
   }
 
@@ -972,11 +1339,11 @@ class Ironpress {
       );
     } finally {
       bindings.freeBenchmarkResult(outPtr);
-      calloc.free(outPtr);
+      malloc.free(outPtr);
     }
   }
 
-  static BatchCompressResult _compressBatchSync(
+  static Future<_TransferableBatchCompressResult> _compressBatchTransferAsync(
     List<_BatchInputSpec> inputs, {
     required int quality,
     int? maxWidth,
@@ -991,11 +1358,10 @@ class Ironpress {
     required int threadCount,
     required int chunkSize,
     SendPort? progressSendPort,
-    CancellationToken? cancellationToken,
-  }) {
-    final bindings = _getBindings();
+    SendPort? controlInitPort,
+  }) async {
+    final bindings = Ironpress._b;
     final stopwatch = Stopwatch()..start();
-
     final paramsPtr = _buildParams(
       quality: quality,
       maxWidth: maxWidth,
@@ -1009,138 +1375,173 @@ class Ironpress {
       png: png,
     );
 
-    final allResults = <CompressResult>[];
+    final allResults = <_TransferableCompressResult>[];
+    ReceivePort? controlPort;
+    StreamSubscription? controlSubscription;
+    var cancelled = false;
     var completed = 0;
+
+    if (controlInitPort != null) {
+      controlPort = ReceivePort();
+      controlSubscription = controlPort.listen((message) {
+        if (message == _cancelBatchMessage) {
+          cancelled = true;
+        }
+      });
+      controlInitPort.send(controlPort.sendPort);
+    }
 
     try {
       for (var start = 0; start < inputs.length; start += chunkSize) {
-        // Check cancellation between chunks
-        if (cancellationToken?.isCancelled ?? false) {
+        if (cancelled) {
           break;
         }
 
         final end = (start + chunkSize).clamp(0, inputs.length);
         final chunkInputs = inputs.sublist(start, end);
-
-        final nativeInputs = calloc<NativeBatchInput>(chunkInputs.length);
-        final allocations = <Pointer>[];
-
-        try {
-          for (var i = 0; i < chunkInputs.length; i++) {
-            final spec = chunkInputs[i];
-            final ref = nativeInputs[i];
-
-            if (spec.path != null) {
-              final pathPtr = spec.path!.toNativeUtf8();
-              allocations.add(pathPtr);
-              ref.filePath = pathPtr;
-              ref.data = nullptr;
-              ref.dataLen = 0;
-            } else if (spec.data != null) {
-              final dataPtr = calloc<Uint8>(spec.data!.length);
-              allocations.add(dataPtr);
-              dataPtr.asTypedList(spec.data!.length).setAll(0, spec.data!);
-              ref.filePath = nullptr;
-              ref.data = dataPtr;
-              ref.dataLen = spec.data!.length;
-            } else {
-              ref.filePath = nullptr;
-              ref.data = nullptr;
-              ref.dataLen = 0;
-            }
-
-            if (spec.outputPath != null) {
-              final outPathPtr = spec.outputPath!.toNativeUtf8();
-              allocations.add(outPathPtr);
-              ref.outputPath = outPathPtr;
-            } else {
-              ref.outputPath = nullptr;
-            }
-          }
-
-          // ═══ FFI CALL: rayon processes this chunk in parallel ═══
-          final batchOutPtr = calloc<NativeBatchResult>();
-
-          try {
-            bindings.compressBatch(
-              nativeInputs,
-              chunkInputs.length,
-              paramsPtr,
-              threadCount,
-              chunkSize,
-              batchOutPtr,
-            );
-
-            final batchRef = batchOutPtr.ref;
-
-            for (var i = 0; i < batchRef.count; i++) {
-              final native = batchRef.results[i];
-
-              if (native.errorCode != 0) {
-                final msg =
-                    native.errorMessage != nullptr
-                        ? native.errorMessage.toDartString()
-                        : 'Error (code ${native.errorCode})';
-                allResults.add(
-                  CompressResult(
-                    data: null,
-                    originalSize: native.originalSize,
-                    compressedSize: 0,
-                    width: 0,
-                    height: 0,
-                    qualityUsed: 0,
-                    iterations: 0,
-                    resizedToFit: false,
-                    errorCode: native.errorCode,
-                    errorMessage: msg,
-                  ),
-                );
-              } else {
-                Uint8List? dartData;
-                if (native.data != nullptr && native.dataLen > 0) {
-                  dartData = Uint8List.fromList(
-                    native.data.cast<Uint8>().asTypedList(native.dataLen),
-                  );
-                }
-
-                allResults.add(
-                  CompressResult(
-                    data: dartData,
-                    originalSize: native.originalSize,
-                    compressedSize: native.dataLen,
-                    width: native.width,
-                    height: native.height,
-                    qualityUsed: native.qualityUsed,
-                    iterations: native.iterations,
-                    resizedToFit: native.resizedToFit != 0,
-                  ),
-                );
-              }
-            }
-
-            bindings.freeBatchResult(batchOutPtr);
-          } finally {
-            calloc.free(batchOutPtr);
-          }
-        } finally {
-          for (final ptr in allocations) {
-            calloc.free(ptr);
-          }
-          calloc.free(nativeInputs);
-        }
+        allResults.addAll(
+          _compressBatchChunkTransferSync(
+            chunkInputs,
+            bindings,
+            paramsPtr,
+            threadCount: threadCount,
+            chunkSize: chunkSize,
+          ),
+        );
 
         completed += chunkInputs.length;
         progressSendPort?.send(completed);
+
+        if (end < inputs.length &&
+            (progressSendPort != null || controlInitPort != null)) {
+          await Future<void>.delayed(Duration.zero);
+        }
       }
     } finally {
+      await controlSubscription?.cancel();
+      controlPort?.close();
       calloc.free(paramsPtr);
     }
 
     stopwatch.stop();
-    return BatchCompressResult(
+    return _TransferableBatchCompressResult(
       results: allResults,
       elapsedMs: stopwatch.elapsedMilliseconds,
     );
+  }
+
+  static List<_TransferableCompressResult> _compressBatchChunkTransferSync(
+    List<_BatchInputSpec> chunkInputs,
+    NativeBindings bindings,
+    Pointer<NativeCompressParams> paramsPtr, {
+    required int threadCount,
+    required int chunkSize,
+  }) {
+    final nativeInputs = calloc<NativeBatchInput>(chunkInputs.length);
+    final disposers = <void Function()>[];
+
+    try {
+      for (var i = 0; i < chunkInputs.length; i++) {
+        final spec = chunkInputs[i];
+        final ref = nativeInputs[i];
+
+        if (spec.path != null) {
+          final pathPtr = spec.path!.toNativeUtf8();
+          disposers.add(() => calloc.free(pathPtr));
+          ref.filePath = pathPtr;
+          ref.data = nullptr;
+          ref.dataLen = 0;
+        } else if (spec.data != null) {
+          final dataPtr = _copyBytesToNative(spec.data!);
+          disposers.add(() => malloc.free(dataPtr));
+          ref.filePath = nullptr;
+          ref.data = dataPtr;
+          ref.dataLen = spec.data!.length;
+        } else {
+          ref.filePath = nullptr;
+          ref.data = nullptr;
+          ref.dataLen = 0;
+        }
+
+        if (spec.outputPath != null) {
+          final outputPathPtr = spec.outputPath!.toNativeUtf8();
+          disposers.add(() => calloc.free(outputPathPtr));
+          ref.outputPath = outputPathPtr;
+        } else {
+          ref.outputPath = nullptr;
+        }
+      }
+
+      final batchOutPtr = malloc<NativeBatchResult>();
+
+      try {
+        bindings.compressBatch(
+          nativeInputs,
+          chunkInputs.length,
+          paramsPtr,
+          threadCount,
+          chunkSize,
+          batchOutPtr,
+        );
+
+        final results = <_TransferableCompressResult>[];
+        final batchRef = batchOutPtr.ref;
+
+        for (var i = 0; i < batchRef.count; i++) {
+          final native = batchRef.results[i];
+          if (native.errorCode != 0) {
+            final msg =
+                native.errorMessage != nullptr
+                    ? native.errorMessage.toDartString()
+                    : 'Error (code ${native.errorCode})';
+            results.add(
+              _TransferableCompressResult(
+                originalSize: native.originalSize,
+                compressedSize: 0,
+                width: 0,
+                height: 0,
+                qualityUsed: 0,
+                iterations: 0,
+                resizedToFit: false,
+                errorCode: native.errorCode,
+                errorMessage: msg,
+              ),
+            );
+            continue;
+          }
+
+          TransferableTypedData? transferData;
+          if (native.data != nullptr && native.dataLen > 0) {
+            transferData = TransferableTypedData.fromList([
+              native.data.cast<Uint8>().asTypedList(native.dataLen),
+            ]);
+          }
+
+          results.add(
+            _TransferableCompressResult(
+              data: transferData,
+              originalSize: native.originalSize,
+              compressedSize: native.dataLen,
+              width: native.width,
+              height: native.height,
+              qualityUsed: native.qualityUsed,
+              iterations: native.iterations,
+              resizedToFit: native.resizedToFit != 0,
+            ),
+          );
+        }
+
+        bindings.freeBatchResult(batchOutPtr);
+        return results;
+      } finally {
+        malloc.free(batchOutPtr);
+      }
+    } finally {
+      for (final dispose in disposers) {
+        dispose();
+      }
+      calloc.free(nativeInputs);
+    }
   }
 }
 

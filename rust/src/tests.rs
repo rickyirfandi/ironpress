@@ -2,6 +2,7 @@
 mod tests {
     use crate::compress::*;
     use crate::options::*;
+    use std::sync::Arc;
 
     /// Create a minimal valid JPEG for testing.
     fn minimal_jpeg() -> Vec<u8> {
@@ -673,6 +674,23 @@ mod tests {
     }
 
     // ─── ABI Version ────────────────────────────────────────────────
+
+    #[test]
+    fn thread_pool_cache_is_keyed_by_effective_thread_count() {
+        let available = crate::num_cpus_safe();
+        if available < 2 {
+            return;
+        }
+
+        let pool_one = crate::get_or_build_pool(1);
+        let pool_one_again = crate::get_or_build_pool(1);
+        let pool_two = crate::get_or_build_pool(2.min(available));
+
+        assert!(Arc::ptr_eq(&pool_one, &pool_one_again));
+        assert!(!Arc::ptr_eq(&pool_one, &pool_two));
+        assert_eq!(pool_one.current_num_threads(), 1);
+        assert_eq!(pool_two.current_num_threads(), 2.min(available));
+    }
 
     #[test]
     fn abi_version_is_nonzero() {

@@ -9,10 +9,13 @@ const String _libName = 'ironpress';
 /// Throws [StateError] with actionable message if the library cannot be loaded.
 DynamicLibrary loadNativeLibrary() {
   if (Platform.isAndroid) {
-    return _tryOpen(
-      'lib$_libName.so',
-      'Android',
-      'Ensure the Rust .so is included in your APK\'s jniLibs.',
+    return _tryOpenCandidates(
+      const ['libironpress.so'],
+      platform: 'Android',
+      packagedHint:
+          'Ensure the packaged Android `jniLibs` include `libironpress.so`.',
+      devHint:
+          'If you are modifying the native code, rebuild the Android library and package it into the app before running.',
     );
   }
 
@@ -21,26 +24,47 @@ DynamicLibrary loadNativeLibrary() {
   }
 
   if (Platform.isMacOS) {
-    return _tryOpen(
-      'lib$_libName.dylib',
-      'macOS',
-      'Run the Rust build script and ensure the .dylib is bundled via CocoaPods.',
+    return _tryOpenCandidates(
+      _desktopCandidates('lib$_libName.dylib', const [
+        'macos',
+        'libs',
+        'libironpress.dylib',
+      ]),
+      platform: 'macOS',
+      packagedHint:
+          'In a packaged Flutter macOS app, `libironpress.dylib` should be bundled automatically.',
+      devHint:
+          'When running directly from this package checkout, ensure the repo `macos/libs` directory is available from the current working directory or `DYLD_LIBRARY_PATH`.',
     );
   }
 
   if (Platform.isLinux) {
-    return _tryOpen(
-      'lib$_libName.so',
-      'Linux',
-      'Run the Rust build script and place the .so next to your executable.',
+    return _tryOpenCandidates(
+      _desktopCandidates('lib$_libName.so', const [
+        'linux',
+        'libs',
+        'libironpress.so',
+      ]),
+      platform: 'Linux',
+      packagedHint:
+          'In a packaged Flutter Linux app, `libironpress.so` should be bundled automatically.',
+      devHint:
+          'When running directly from this package checkout, ensure the repo `linux/libs` directory is reachable from the current working directory or `LD_LIBRARY_PATH`.',
     );
   }
 
   if (Platform.isWindows) {
-    return _tryOpen(
-      '$_libName.dll',
-      'Windows',
-      'Run the Rust build script and place the .dll next to your executable.',
+    return _tryOpenCandidates(
+      _desktopCandidates('$_libName.dll', const [
+        'windows',
+        'libs',
+        '$_libName.dll',
+      ]),
+      platform: 'Windows',
+      packagedHint:
+          'In a packaged Flutter Windows app, `ironpress.dll` should be bundled automatically.',
+      devHint:
+          'When running directly from this package checkout, ensure the repo `windows/libs` directory is reachable from the current working directory or `PATH`.',
     );
   }
 
@@ -49,14 +73,47 @@ DynamicLibrary loadNativeLibrary() {
   );
 }
 
-DynamicLibrary _tryOpen(String name, String platform, String hint) {
-  try {
-    return DynamicLibrary.open(name);
-  } catch (e) {
-    throw StateError(
-      'ironpress: failed to load native library "$name" on $platform.\n'
-      '$hint\n'
-      'Original error: $e',
-    );
+List<String> _desktopCandidates(
+  String bundledName,
+  List<String> fallbackSegments,
+) {
+  final candidates = <String>[bundledName];
+  var dir = Directory.current.absolute;
+  for (var depth = 0; depth < 3; depth++) {
+    candidates.add(_joinPath(dir.path, fallbackSegments));
+    final parent = dir.parent;
+    if (parent.path == dir.path) {
+      break;
+    }
+    dir = parent;
   }
+  return candidates.toSet().toList();
+}
+
+String _joinPath(String root, List<String> segments) {
+  return [root, ...segments].join(Platform.pathSeparator);
+}
+
+DynamicLibrary _tryOpenCandidates(
+  List<String> candidates, {
+  required String platform,
+  required String packagedHint,
+  required String devHint,
+}) {
+  final errors = <String>[];
+  for (final candidate in candidates) {
+    try {
+      return DynamicLibrary.open(candidate);
+    } catch (error) {
+      errors.add('  - $candidate: $error');
+    }
+  }
+
+  throw StateError(
+    'ironpress: failed to load the native library on $platform.\n'
+    '$packagedHint\n'
+    '$devHint\n'
+    'Attempted locations:\n'
+    '${errors.join('\n')}',
+  );
 }

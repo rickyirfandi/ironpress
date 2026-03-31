@@ -77,7 +77,49 @@ jobs:
         working-directory: rust
         run: cargo clippy -- -D warnings
 
+      - name: Install cargo-audit
+        working-directory: rust
+        run: cargo install cargo-audit --locked
+
+      - name: Audit Rust dependencies
+        working-directory: rust
+        run: cargo audit
+
   # ─── Pub publish dry-run ─────────────────────────────────────────────────
+  windows-desktop-smoke:
+    name: Desktop smoke (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Install Dart dependencies
+        run: flutter pub get
+
+      - name: Smoke test bundled Windows library
+        run: flutter test test/integration_test.dart --plain-name "produces non-empty output with valid stats"
+
+  macos-desktop-smoke:
+    name: Desktop smoke (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Install Dart dependencies
+        run: flutter pub get
+
+      - name: Smoke test bundled macOS library
+        run: flutter test test/integration_test.dart --plain-name "produces non-empty output with valid stats"
+
   publish-check:
     name: pub publish --dry-run
     runs-on: ubuntu-latest

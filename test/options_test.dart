@@ -202,9 +202,9 @@ void main() {
       expect(ImageFormat.webp.name, 'WebP');
     });
 
-    test('unknown value defaults to jpeg', () {
-      expect(ImageFormat.fromValue(99), ImageFormat.jpeg);
-      expect(ImageFormat.fromValue(0), ImageFormat.jpeg);
+    test('unknown value throws instead of silently defaulting', () {
+      expect(() => ImageFormat.fromValue(99), throwsA(isA<StateError>()));
+      expect(() => ImageFormat.fromValue(0), throwsA(isA<StateError>()));
     });
   });
 
@@ -377,6 +377,32 @@ void main() {
       expect(token.isCancelled, isTrue);
       token.reset();
       expect(token.isCancelled, isFalse);
+    });
+
+    test('listeners run once on cancel', () {
+      final token = CancellationToken();
+      var notifications = 0;
+      token.addListener(() {
+        notifications++;
+      });
+
+      token.cancel();
+      token.cancel();
+
+      expect(notifications, 1);
+    });
+
+    test('listener disposer unsubscribes callback', () {
+      final token = CancellationToken();
+      var notifications = 0;
+      final dispose = token.addListener(() {
+        notifications++;
+      });
+
+      dispose();
+      token.cancel();
+
+      expect(notifications, 0);
     });
   });
 

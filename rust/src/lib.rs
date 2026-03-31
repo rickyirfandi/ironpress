@@ -5,34 +5,44 @@ mod options;
 #[cfg(test)]
 mod tests;
 
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::ffi::CStr;
 use std::slice;
-use std::sync::atomic::AtomicU32;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use options::{CompressParams, CompressResult};
 
 /// Cached rayon thread pool — avoids rebuilding OS threads on every batch call.
 /// Under high-intensity workloads this saves ~1-2ms per batch invocation.
 /// The pool is sized to `available_cpus - 2` on first use and reused thereafter.
-static THREAD_POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+static THREAD_POOLS: OnceLock<Mutex<HashMap<usize, Arc<rayon::ThreadPool>>>> = OnceLock::new();
 
-fn get_or_build_pool(requested_threads: usize) -> &'static rayon::ThreadPool {
-    THREAD_POOL.get_or_init(|| {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(requested_threads)
-            .thread_name(|i| format!("img-compress-{i}"))
-            .stack_size(4 * 1024 * 1024)
-            .build()
-            .unwrap_or_else(|_| {
-                // Last resort: single-threaded pool. If even this fails,
-                // rayon's global pool will be used via the fallback below.
-                rayon::ThreadPoolBuilder::new()
-                    .num_threads(1)
-                    .build()
-                    .expect("Failed to create even a single-threaded rayon pool")
-            })
-    })
+fn build_pool(requested_threads: usize) -> rayon::ThreadPool {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(requested_threads)
+        .thread_name(|i| format!("img-compress-{i}"))
+        .stack_size(4 * 1024 * 1024)
+        .build()
+        .unwrap_or_else(|_| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(1)
+                .build()
+                .expect("Failed to create even a single-threaded rayon pool")
+        })
+}
+
+fn get_or_build_pool(requested_threads: usize) -> Arc<rayon::ThreadPool> {
+    let pools = THREAD_POOLS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut pools = pools.lock().expect("thread pool cache poisoned");
+
+    if let Some(pool) = pools.get(&requested_threads) {
+        return Arc::clone(pool);
+    }
+
+    let pool = Arc::new(build_pool(requested_threads));
+    pools.insert(requested_threads, Arc::clone(&pool));
+    pool
 }
 
 /// ABI version — increment when any #[repr(C)] struct layout changes.
@@ -312,7 +322,7 @@ pub unsafe extern "C" fn compress_batch(
     count: usize,
     params: *const CompressParams,
     thread_count: u32,
-    chunk_size: u32,
+    _chunk_size: u32,
     out: *mut options::BatchResult,
 ) {
     if out.is_null() {
@@ -341,53 +351,42 @@ pub unsafe extern "C" fn compress_batch(
         // ── Thread count: safe default leaves room for Flutter UI ──
         let available = num_cpus_safe();
         let num_threads = if thread_count > 0 {
-            (thread_count as usize).min(available)
+            (thread_count as usize).min(available).min(count.max(1))
         } else {
-            available.saturating_sub(2).max(1)
+            available.saturating_sub(2).max(1).min(count.max(1))
         };
 
         // ── Chunk size: bounds peak memory ──
-        let chunk = if chunk_size > 0 {
-            chunk_size as usize
-        } else {
-            8usize.min(count)
-        };
+        // Dart already chunks batch work when it needs chunk-boundary
+        // cancellation or progress semantics. Native batch parallelizes the
+        // provided slice directly to avoid a second scheduling layer.
 
         // ── Atomic progress counter (Dart can poll this) ──
-        let progress = Box::new(AtomicU32::new(0));
-        let progress_ref = progress.as_ref();
-
+        // Measure native wall-clock time for the provided slice.
         let start = Instant::now();
 
         // Reuse cached thread pool — avoids OS thread creation overhead on every call.
         let pool = get_or_build_pool(num_threads);
 
         // ── Process in chunks to bound memory ──
-        let mut all_results: Vec<CompressResult> = Vec::with_capacity(count);
-
-        pool.install(|| {
-            for chunk_inputs in inputs_slice.chunks(chunk) {
-                let chunk_results: Vec<CompressResult> = chunk_inputs
-                    .par_iter()
-                    .map(|input| {
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let all_results: Vec<CompressResult> = pool.install(|| {
+            inputs_slice
+                .par_iter()
+                .map(|input| {
+                    let result =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             process_batch_input(input, params)
                         }));
 
-                        progress_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-                        match result {
-                            Ok(r) => r,
-                            Err(_) => CompressResult::error(
-                                -99,
-                                "Internal panic during compression (possible OOM or corrupt image)",
-                            ),
-                        }
-                    })
-                    .collect();
-
-                all_results.extend(chunk_results);
-            }
+                    match result {
+                        Ok(r) => r,
+                        Err(_) => CompressResult::error(
+                            -99,
+                            "Internal panic during compression (possible OOM or corrupt image)",
+                        ),
+                    }
+                })
+                .collect()
         });
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
@@ -397,13 +396,12 @@ pub unsafe extern "C" fn compress_batch(
         let ptr = boxed_results.as_mut_ptr();
         let len = boxed_results.len();
         std::mem::forget(boxed_results);
-        let progress_ptr = Box::into_raw(progress) as *mut u32;
 
         options::BatchResult {
             results: ptr,
             count: len,
             elapsed_ms,
-            completed: progress_ptr,
+            completed: std::ptr::null_mut(),
         }
     }));
 
@@ -418,48 +416,29 @@ pub unsafe extern "C" fn compress_batch(
     };
 }
 
-/// Get the current batch progress (number of items completed).
-/// Returns 0 if no batch is in progress or if the pointer is null.
-///
-/// # Safety
-/// `progress_ptr` must be a valid pointer from a BatchResult's `completed` field,
-/// or null.
-#[no_mangle]
-pub unsafe extern "C" fn batch_progress(progress_ptr: *const u32) -> u32 {
-    if progress_ptr.is_null() {
-        return 0;
-    }
-    let atomic = &*(progress_ptr as *const std::sync::atomic::AtomicU32);
-    atomic.load(std::sync::atomic::Ordering::Relaxed)
-}
-
 /// Process a single batch input item. Called from rayon worker threads.
 unsafe fn process_batch_input(
     input: &options::BatchInput,
     params: &CompressParams,
 ) -> CompressResult {
     // Read input data — file path or memory buffer
-    let (input_data, original_size) = if !input.file_path.is_null() {
+    let input_data: Cow<'_, [u8]> = if !input.file_path.is_null() {
         let path = match CStr::from_ptr(input.file_path).to_str() {
             Ok(s) => s,
             Err(_) => return CompressResult::error(-2, "Invalid UTF-8 in file path"),
         };
         match std::fs::read(path) {
-            Ok(data) => {
-                let size = data.len();
-                (data, size)
-            }
+            Ok(data) => Cow::Owned(data),
             Err(e) => {
                 return CompressResult::error(-3, &format!("Failed to read: {e}"));
             }
         }
     } else if !input.data.is_null() && input.data_len > 0 {
-        let data = slice::from_raw_parts(input.data, input.data_len).to_vec();
-        let size = data.len();
-        (data, size)
+        Cow::Borrowed(slice::from_raw_parts(input.data, input.data_len))
     } else {
         return CompressResult::error(-1, "BatchInput has no file_path or data");
     };
+    let original_size = input_data.len();
 
     if original_size > MAX_INPUT_SIZE {
         return CompressResult::error(
@@ -469,12 +448,10 @@ unsafe fn process_batch_input(
     }
 
     // Compress
-    let compress_result = match compress::compress_bytes(&input_data, params) {
+    let compress_result = match compress::compress_bytes(input_data.as_ref(), params) {
         Ok(r) => r,
         Err(e) => return CompressResult::error(-10, &e.to_string()),
     };
-
-    drop(input_data);
 
     // Write to output file if path provided
     if !input.output_path.is_null() {
@@ -549,12 +526,7 @@ pub unsafe extern "C" fn free_batch_result(result: *mut options::BatchResult) {
         batch.results = std::ptr::null_mut();
     }
 
-    // Free the atomic progress counter
-    if !batch.completed.is_null() {
-        let _ = Box::from_raw(batch.completed as *mut std::sync::atomic::AtomicU32);
-        batch.completed = std::ptr::null_mut();
-    }
-
+    batch.completed = std::ptr::null_mut();
     batch.count = 0;
 }
 

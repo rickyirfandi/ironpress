@@ -226,9 +226,8 @@ pub struct BatchResult {
     pub count: usize,
     /// Total wall-clock time in milliseconds for the entire batch.
     pub elapsed_ms: u64,
-    /// Pointer to atomic progress counter. Can be polled from another thread
-    /// via `batch_progress()` to get live completion count during processing.
-    /// Freed by `free_batch_result`.
+    /// Reserved for ABI compatibility with previously shipped binaries.
+    /// Always null in current builds.
     pub completed: *mut u32,
 }
 

@@ -17,7 +17,8 @@
       "Bash(dart format:*)",
       "Bash(flutter pub:*)",
       "Bash(cd:*)",
-      "Bash(find /c/PROJECT/ironpress/rust -name *.rs -type f)"
+      "Bash(find /c/PROJECT/ironpress/rust -name *.rs -type f)",
+      "Bash(dart analyze:*)"
     ]
   }
 }

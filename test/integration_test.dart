@@ -381,6 +381,21 @@ Uint8List _syntheticPng() {
   ]);
 }
 
+Uint8List _jpegWithExif() {
+  final base = _syntheticJpeg();
+  return Uint8List.fromList([
+    ...base.sublist(0, 2),
+    0xFF,
+    0xE1,
+    0x00,
+    0x0A,
+    ...'Exif\x00\x00'.codeUnits,
+    0x00,
+    0x00,
+    ...base.sublist(2),
+  ]);
+}
+
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
 /// Returns true if the native library loaded successfully.
@@ -394,6 +409,15 @@ bool _nativeLibraryAvailable() {
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
+
+Future<T?> _runWithNative<T>(Future<T> Function() action) async {
+  try {
+    return await action();
+  } on StateError catch (error) {
+    markTestSkipped('Native library not available: $error');
+    return null;
+  }
+}
 
 void main() {
   group('Integration — compressBytes (JPEG)', () {
@@ -672,6 +696,223 @@ void main() {
   });
 
   group('Integration — native version', () {
+    group('Integration - batch contracts', () {
+      test(
+        'progress is monotonic and final completion is emitted once',
+        () async {
+          final progressUpdates = <MapEntry<int, int>>[];
+          final batch = await _runWithNative(
+            () => Ironpress.compressBatch(
+              List.generate(4, (_) => CompressInput(data: _syntheticJpeg())),
+              quality: 80,
+              chunkSize: 1,
+              onProgress: (completed, total) {
+                progressUpdates.add(MapEntry(completed, total));
+              },
+            ),
+          );
+          if (batch == null) {
+            return;
+          }
+
+          expect(batch.results.length, 4);
+          expect(progressUpdates, isNotEmpty);
+
+          var previous = 0;
+          for (final update in progressUpdates) {
+            expect(update.key, greaterThanOrEqualTo(previous));
+            expect(update.value, 4);
+            previous = update.key;
+          }
+
+          expect(progressUpdates.where((update) => update.key == 4).length, 1);
+        },
+      );
+
+      test('cancellation with progress preserves partial results', () async {
+        const total = 20;
+        final token = CancellationToken();
+        final batch = await _runWithNative(
+          () => Ironpress.compressBatch(
+            List.generate(total, (_) => CompressInput(data: _syntheticJpeg())),
+            quality: 80,
+            chunkSize: 1,
+            cancellationToken: token,
+            onProgress: (completed, _) {
+              if (completed == 1) {
+                token.cancel();
+              }
+            },
+          ),
+        );
+        if (batch == null) {
+          return;
+        }
+
+        expect(batch.results.length, greaterThan(0));
+        expect(batch.results.length, lessThan(total));
+      });
+
+      test(
+        'cancellation without progress stops before full completion',
+        () async {
+          const total = 50;
+          final token = CancellationToken();
+          final future = Ironpress.compressBatch(
+            List.generate(total, (_) => CompressInput(data: _syntheticJpeg())),
+            quality: 80,
+            chunkSize: 1,
+            cancellationToken: token,
+          );
+          token.cancel();
+
+          BatchCompressResult batch;
+          try {
+            batch = await future;
+          } on StateError catch (error) {
+            markTestSkipped('Native library not available: $error');
+            return;
+          }
+
+          expect(batch.results.length, lessThan(total));
+        },
+      );
+
+      test('mixed success and failure results are preserved', () async {
+        final batch = await _runWithNative(
+          () => Ironpress.compressBatch(
+            [
+              CompressInput(data: _syntheticJpeg()),
+              CompressInput(data: Uint8List.fromList([1, 2, 3, 4])),
+              CompressInput(data: _syntheticPng()),
+            ],
+            quality: 80,
+            chunkSize: 1,
+          ),
+        );
+        if (batch == null) {
+          return;
+        }
+
+        expect(batch.results.length, 3);
+        expect(batch.results[0].isSuccess, isTrue);
+        expect(batch.results[1].isSuccess, isFalse);
+        expect(batch.results[1].errorCode, isNotNull);
+        expect(batch.results[2].isSuccess, isTrue);
+      });
+    });
+
+    group('Integration - batch output paths', () {
+      late Directory tempDir;
+
+      setUp(() {
+        tempDir = Directory.systemTemp.createTempSync('ironpress_batch_');
+      });
+
+      tearDown(() {
+        tempDir.deleteSync(recursive: true);
+      });
+
+      test('per-item outputPath writes to disk and preserves order', () async {
+        final outputPath = '${tempDir.path}/batch-output.jpg';
+        final batch = await _runWithNative(
+          () => Ironpress.compressBatch(
+            [
+              CompressInput(data: _syntheticJpeg(), outputPath: outputPath),
+              CompressInput(data: _syntheticJpeg()),
+            ],
+            quality: 80,
+            chunkSize: 1,
+          ),
+        );
+        if (batch == null) {
+          return;
+        }
+
+        expect(batch.results.length, 2);
+        expect(batch.results[0].isFileOutput, isTrue);
+        expect(batch.results[0].data, isNull);
+        expect(File(outputPath).existsSync(), isTrue);
+        expect(File(outputPath).lengthSync(), greaterThan(0));
+        expect(batch.results[1].data, isNotNull);
+      });
+    });
+
+    group('Integration - benchmark', () {
+      late Directory tempDir;
+
+      setUp(() {
+        tempDir = Directory.systemTemp.createTempSync('ironpress_benchmark_');
+      });
+
+      tearDown(() {
+        tempDir.deleteSync(recursive: true);
+      });
+
+      test('benchmarkBytes returns sweep entries', () async {
+        final result = await _runWithNative(
+          () => Ironpress.benchmarkBytes(_syntheticJpeg()),
+        );
+        if (result == null) {
+          return;
+        }
+
+        expect(result.entries, isNotEmpty);
+        expect(result.recommendedQuality, inInclusiveRange(0, 100));
+      });
+
+      test('benchmarkFile reads a real file path', () async {
+        final inputFile = File('${tempDir.path}/input.jpg')
+          ..writeAsBytesSync(_syntheticJpeg());
+        final result = await _runWithNative(
+          () => Ironpress.benchmarkFile(inputFile.path),
+        );
+        if (result == null) {
+          return;
+        }
+
+        expect(result.entries, isNotEmpty);
+        expect(result.format, ImageFormat.jpeg);
+      });
+    });
+
+    group('Integration - keepMetadata', () {
+      test('JPEG metadata is preserved only for JPEG output', () async {
+        final preserved = await _runWithNative(
+          () => Ironpress.compressBytes(
+            _jpegWithExif(),
+            quality: 80,
+            format: CompressFormat.jpeg,
+            keepMetadata: true,
+          ),
+        );
+        if (preserved == null) {
+          return;
+        }
+
+        final preservedProbe = await Ironpress.probeBytes(preserved.data!);
+        expect(preservedProbe.hasExif, isTrue);
+
+        final dropped = await Ironpress.compressBytes(
+          _jpegWithExif(),
+          quality: 80,
+          format: CompressFormat.jpeg,
+          keepMetadata: false,
+        );
+        final droppedProbe = await Ironpress.probeBytes(dropped.data!);
+        expect(droppedProbe.hasExif, isFalse);
+
+        final pngOutput = await Ironpress.compressBytes(
+          _jpegWithExif(),
+          format: CompressFormat.png,
+          keepMetadata: true,
+        );
+        final pngProbe = await Ironpress.probeBytes(pngOutput.data!);
+        expect(pngProbe.format, ImageFormat.png);
+        expect(pngProbe.hasExif, isFalse);
+      });
+    });
+
     test('nativeVersion returns a non-empty string', () {
       if (!_nativeLibraryAvailable()) {
         markTestSkipped('Native library not available');

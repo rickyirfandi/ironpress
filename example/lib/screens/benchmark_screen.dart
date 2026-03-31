@@ -74,7 +74,8 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
     final theme = Theme.of(context);
     final result = _result;
     final completedPackages = result?.completedPackages.toList() ?? const [];
-    final unavailablePackages = result?.unavailablePackages.toList() ?? const [];
+    final unavailablePackages =
+        result?.unavailablePackages.toList() ?? const [];
 
     return Scaffold(
       appBar: AppBar(title: const Text('Benchmark')),
@@ -110,7 +111,9 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
                       divisions: 55,
                       label: _quality.round().toString(),
                       onChanged:
-                          _loading ? null : (value) => setState(() => _quality = value),
+                          _loading
+                              ? null
+                              : (value) => setState(() => _quality = value),
                     ),
                     Text(
                       'Batch images: ${_batchCount.round()}',
@@ -223,10 +226,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
                       const SizedBox(height: 12),
                       LinearProgressIndicator(value: _progress),
                       const SizedBox(height: 8),
-                      Text(
-                        _status,
-                        style: theme.textTheme.bodyMedium,
-                      ),
+                      Text(_status, style: theme.textTheme.bodyMedium),
                     ],
                   ),
                 ),
@@ -295,7 +295,9 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
                             ),
                             cells: [
                               DataCell(_PackageLabel(package: package)),
-                              DataCell(Text(formatBytes(package.single!.outputBytes))),
+                              DataCell(
+                                Text(formatBytes(package.single!.outputBytes)),
+                              ),
                               DataCell(
                                 Text(
                                   _formatReduction(
@@ -357,7 +359,9 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
                                 ),
                               ),
                               DataCell(
-                                Text(formatBytes(package.batch!.totalOutputBytes)),
+                                Text(
+                                  formatBytes(package.batch!.totalOutputBytes),
+                                ),
                               ),
                               DataCell(
                                 Text(
@@ -457,9 +461,8 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
                               entry.quality ==
                                       result.ironpressSweep.recommendedQuality
                                   ? WidgetStateProperty.all(
-                                    theme.colorScheme.primaryContainer.withAlpha(
-                                      80,
-                                    ),
+                                    theme.colorScheme.primaryContainer
+                                        .withAlpha(80),
                                   )
                                   : null,
                           cells: [
@@ -482,10 +485,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
 }
 
 class _HighlightsCard extends StatelessWidget {
-  const _HighlightsCard({
-    required this.originalBytes,
-    required this.packages,
-  });
+  const _HighlightsCard({required this.originalBytes, required this.packages});
 
   final int originalBytes;
   final List<PackageBenchmarkResult> packages;
@@ -664,22 +664,31 @@ PackageBenchmarkResult? _mostEfficientPackage(
   );
 }
 
-PackageBenchmarkResult? _fastestSinglePackage(List<PackageBenchmarkResult> packages) {
+PackageBenchmarkResult? _fastestSinglePackage(
+  List<PackageBenchmarkResult> packages,
+) {
   if (packages.isEmpty) return null;
   return packages.reduce(
     (best, next) =>
-        next.single!.medianElapsedMs < best.single!.medianElapsedMs ? next : best,
+        next.single!.medianElapsedMs < best.single!.medianElapsedMs
+            ? next
+            : best,
   );
 }
 
-PackageBenchmarkResult? _smallestSinglePackage(List<PackageBenchmarkResult> packages) {
+PackageBenchmarkResult? _smallestSinglePackage(
+  List<PackageBenchmarkResult> packages,
+) {
   if (packages.isEmpty) return null;
   return packages.reduce(
-    (best, next) => next.single!.outputBytes < best.single!.outputBytes ? next : best,
+    (best, next) =>
+        next.single!.outputBytes < best.single!.outputBytes ? next : best,
   );
 }
 
-PackageBenchmarkResult? _fastestBatchPackage(List<PackageBenchmarkResult> packages) {
+PackageBenchmarkResult? _fastestBatchPackage(
+  List<PackageBenchmarkResult> packages,
+) {
   if (packages.isEmpty) return null;
   return packages.reduce(
     (best, next) =>

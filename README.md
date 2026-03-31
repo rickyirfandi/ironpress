@@ -5,7 +5,7 @@
 <h1 align="center">ironpress</h1>
 
 <p align="center">
-  <strong>Rust-powered image compression for Flutter.</strong>
+  <strong>High-performance Rust-powered image compression for Flutter.</strong>
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
 
 ---
 
-ironpress compresses JPEG, PNG, and WebP images using mozjpeg, oxipng, and libwebp, compiled as native Rust libraries. mozjpeg and oxipng are **state-of-the-art compression engines** trusted by major CDNs and tech companies. All encoding runs in a single FFI call with no platform API dependencies, producing byte-identical output on every device. Accepts JPEG, PNG, WebP, GIF, BMP, and TIFF as input.
+ironpress compresses JPEG, PNG, and WebP images using mozjpeg, oxipng, and libwebp, compiled as native Rust libraries. mozjpeg and oxipng are **state-of-the-art compression engines** trusted by major CDNs and tech companies. Single-image operations run in one native call; batch work is orchestrated chunk-by-chunk in Dart and each chunk is processed natively, which keeps progress and cancellation deterministic. Accepts JPEG, PNG, WebP, GIF, BMP, and TIFF as input.
 
 ## Features
 
@@ -29,7 +29,7 @@ ironpress compresses JPEG, PNG, and WebP images using mozjpeg, oxipng, and libwe
 - **Target file size** in a single FFI call (binary search runs entirely in Rust, zero round-trips)
 - **Parallel batch compression** via Rayon with work-stealing across all cores
 - **Byte-identical output** on Android, iOS, and Windows
-- **Progress callbacks** and **cancellation tokens** for batch operations
+- **Deterministic progress callbacks** and **cancellation tokens** for batch operations
 - **Quality presets** (low, medium, high) for common use cases
 - **Image probe** reads dimensions, format, and EXIF presence without decoding pixels
 - **Quality benchmark sweep** to find optimal compression settings
@@ -46,7 +46,9 @@ ironpress compresses JPEG, PNG, and WebP images using mozjpeg, oxipng, and libwe
 | macOS | arm64, x86_64 (universal) | Prebuilt |
 | Linux | x86_64 | Prebuilt |
 
-All platforms ship with precompiled native libraries. No Rust toolchain required. Web is not supported (dart:ffi is unavailable on Flutter Web).
+All platforms ship with precompiled native libraries. No Rust toolchain is required for normal package consumers. Web is not supported (dart:ffi is unavailable on Flutter Web).
+
+For desktop Flutter apps, the packaged native library is expected to be bundled automatically by the plugin. When running tests or examples directly from this package checkout, ironpress also probes the repo `windows/libs`, `linux/libs`, and `macos/libs` directories before failing.
 
 ## Getting Started
 
@@ -54,7 +56,7 @@ All platforms ship with precompiled native libraries. No Rust toolchain required
 
 ```yaml
 dependencies:
-  ironpress: ^0.1.0
+  ironpress: ^0.2.0
 ```
 
 ### Basic Usage
@@ -90,6 +92,8 @@ print('Quality: ${result.qualityUsed}, Iterations: ${result.iterations}');
 
 Compress entire galleries in parallel across all available cores. Progress callbacks and cancellation are built in.
 
+Progress is reported at chunk boundaries, so smaller `chunkSize` values give finer-grained updates. The callback is monotonic and emits the final `(total, total)` update exactly once. Cancellation works with or without `onProgress`, is observed between chunks, and preserves results for work that already completed.
+
 ```dart
 final token = CancellationToken();
 
@@ -103,7 +107,7 @@ final batch = await Ironpress.compressBatch(
 );
 
 print(batch);
-// BatchCompressResult(198/200 ok, 2 failed, 6823ms, 29.3 img/s, 4.1 MB/s)
+// BatchCompressResult(200 images, 6823ms, 29.3 img/s, 4.1 MB/s, 91.0% avg reduction)
 ```
 
 ### Quality Presets
@@ -118,6 +122,24 @@ final result = await Ironpress.compressFile(
 ```
 
 ## Benchmarks
+
+For repeatable local measurements, run the manual benchmark harness from the repo root:
+
+```powershell
+$env:IRONPRESS_BENCH_WARMUP='2'
+$env:IRONPRESS_BENCH_RUNS='5'
+$env:IRONPRESS_BENCH_BATCH_SIZE='24'
+$env:IRONPRESS_BENCH_CHUNK_SIZE='8'
+flutter test scripts\perf_benchmark_test.dart --reporter expanded
+```
+
+Optional environment variables:
+
+- `IRONPRESS_BENCH_CORPUS_DIR`: absolute path to a real image corpus directory
+- `IRONPRESS_BENCH_THREAD_COUNT`: override native batch threads
+- `IRONPRESS_BENCH_QUALITY`: override the benchmark quality (default `80`)
+
+The command prints p50/p95 latency, throughput, average output size, and observed RSS deltas for `compressFile`, `compressBytes`, `compressBatch(files)`, and `compressBatch(bytes)`.
 
 Measured on a 2048x1536 JPEG (250 KB) at quality 80, JPEG output, no resize, no metadata. Median of 5 runs after 2 warm-ups.
 
@@ -160,6 +182,16 @@ final result = await Ironpress.compressFile(
 ### Metadata Handling
 
 `keepMetadata: true` preserves EXIF data for JPEG-to-JPEG output. When converting to PNG or WebP, metadata is silently dropped. The flag is always safe to pass.
+
+### Desktop Loading
+
+In packaged Flutter desktop apps, the native library should be bundled automatically by the plugin and loaded by name:
+
+- Windows: `ironpress.dll`
+- Linux: `libironpress.so`
+- macOS: `libironpress.dylib`
+
+When running this package directly from a checkout, ironpress also probes the repo `windows/libs`, `linux/libs`, and `macos/libs` directories. If you are rebuilding the native code locally, update those packaged desktop libraries or point the platform loader (`PATH`, `LD_LIBRARY_PATH`, or `DYLD_LIBRARY_PATH`) at your rebuilt output.
 
 ### Diagnostics
 
